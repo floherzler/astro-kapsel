@@ -15,39 +15,29 @@ export default async ({ req, res, log, error }: any) => {
     try {
         // --- Parse body ---
         let body: Body = {};
-
         try {
-            // First try standard JSON parse
             body = await req.json();
-            log(`[addComet] Parsed JSON body keys: ${Object.keys(body).join(',')}`);
+            log(`[addComet] Parsed JSON body keys: ${Object.keys(body).join(",")}`);
         } catch {
             log("[addComet] req.json() failed, trying fallback...");
-
-            // Fallback 1: bodyText (Appwrite Functions v7)
-            if (typeof req.bodyText === 'string' && req.bodyText.length > 0) {
+            if (typeof req.bodyText === "string" && req.bodyText.length > 0) {
                 try {
                     body = JSON.parse(req.bodyText);
-                    log(`[addComet] Parsed bodyText JSON keys: ${Object.keys(body).join(',')}`);
+                    log(`[addComet] Parsed bodyText JSON keys: ${Object.keys(body).join(",")}`);
                 } catch {
                     log("[addComet] bodyText is not valid JSON");
                 }
-            }
-
-            // Fallback 2: payload/raw (legacy or console test)
-            else if (typeof req.payload === 'string' && req.payload.length > 0) {
+            } else if (typeof req.payload === "string" && req.payload.length > 0) {
                 try {
                     body = JSON.parse(req.payload);
-                    log(`[addComet] Parsed payload JSON keys: ${Object.keys(body).join(',')}`);
+                    log(`[addComet] Parsed payload JSON keys: ${Object.keys(body).join(",")}`);
                 } catch {
                     log("[addComet] payload is not valid JSON");
                 }
             }
         }
 
-        // Check cometID
-        if (!body?.cometID) {
-            return fail(res, "Missing required field: cometID");
-        }
+        if (!body?.cometID) return fail(res, "Missing required field: cometID");
 
         const cometID = body.cometID.trim();
         log(`[addComet] Fetching data for comet ${cometID} ☄️`);
@@ -72,25 +62,27 @@ export default async ({ req, res, log, error }: any) => {
             return fail(res, "Invalid or empty response from NASA API", 404);
         }
 
-        // --- Extract summary ---
+        // --- Extract summary (correct field mapping) ---
+        const els = nasaData.orbit?.elements ?? [];
+        const val = (n: string) => els.find((e: any) => e.name === n)?.value ?? null;
+
         const summary = {
-            name: nasaData.object.fullname,
-            designation: nasaData.object.des,
-            orbitClass: nasaData.object.orbit_class?.name,
-            perihelion: nasaData.orbit?.elements?.find((el: any) => el.name === "q")?.value,
-            eccentricity: nasaData.orbit?.elements?.find((el: any) => el.name === "e")?.value,
-            period_days: nasaData.orbit?.elements?.find((el: any) => el.name === "per")?.value,
+            name: nasaData.object.fullname ?? null,
+            designation: nasaData.object.des ?? null,
+            orbit_class: nasaData.object.orbit_class?.name ?? null,
+            eccentricity: val("e") ? parseFloat(val("e")) : null,
+            semi_major_axis: val("a") ? parseFloat(val("a")) : null,
+            perihelion_distance: val("q") ? parseFloat(val("q")) : null,
+            period_years: val("per") ? parseFloat(val("per")) / 365.25 : null,
+            last_perihelion_year: val("tp") ? parseFloat(val("tp")) : null, // store JD directly
             source: nasaData.signature?.source ?? "NASA/JPL SBDB",
-            createdAt: new Date().toISOString(),
         };
 
         // --- Connect to Appwrite ---
         const endpoint = Deno.env.get("APPWRITE_FUNCTION_API_ENDPOINT") ?? "";
         const projectId = Deno.env.get("APPWRITE_FUNCTION_PROJECT_ID") ?? "";
         const apiKey =
-            req.headers["x-appwrite-key"] ??
-            Deno.env.get("APPWRITE_API_KEY") ??
-            "";
+            req.headers["x-appwrite-key"] ?? Deno.env.get("APPWRITE_API_KEY") ?? "";
 
         const client = new Client()
             .setEndpoint(endpoint)
@@ -98,7 +90,6 @@ export default async ({ req, res, log, error }: any) => {
             .setKey(apiKey);
 
         const tablesDB = new TablesDB(client);
-
         const databaseId = Deno.env.get("APPWRITE_DATABASE_ID") ?? "astroDB";
         const cometsTableId = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
 
@@ -107,9 +98,7 @@ export default async ({ req, res, log, error }: any) => {
             const existing = await tablesDB.listRows({
                 databaseId,
                 tableId: cometsTableId,
-                queries: [
-                    Query.equal("designation", summary.designation)
-                ]
+                queries: [Query.equal("designation", summary.designation)],
             });
 
             if (existing.total > 0) {
@@ -140,11 +129,15 @@ export default async ({ req, res, log, error }: any) => {
 
         log(`[addComet] Successfully added comet ${summary.name} to Appwrite ✅`);
 
-        return ok(res, {
-            success: true,
-            message: `☄️ Comet ${summary.name} added successfully!`,
-            comet: newRow,
-        }, 201);
+        return ok(
+            res,
+            {
+                success: true,
+                message: `☄️ Comet ${summary.name} added successfully!`,
+                comet: newRow,
+            },
+            201
+        );
     } catch (e: any) {
         const msg = String(e?.message ?? e);
         error(`[addComet] Uncaught error 🚨: ${msg}`);
