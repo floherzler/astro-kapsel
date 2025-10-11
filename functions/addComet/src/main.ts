@@ -92,6 +92,7 @@ export default async ({ req, res, log, error }: any) => {
         const tablesDB = new TablesDB(client);
         const databaseId = Deno.env.get("APPWRITE_DATABASE_ID") ?? "astroDB";
         const cometsTableId = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
+        const flybyTableId = Deno.env.get("APPWRITE_TABLE_FLYBYS") ?? "flybys";
 
         // --- Prevent duplicates ---
         try {
@@ -128,6 +129,46 @@ export default async ({ req, res, log, error }: any) => {
         }
 
         log(`[addComet] Successfully added comet ${summary.name} to Appwrite ✅`);
+
+        // --- After comet insertion ---
+        if (newRow && summary.period_years && summary.last_perihelion_year) {
+            try {
+                const period = summary.period_years;
+                const jd = summary.last_perihelion_year;
+
+                // Convert Julian Date → approximate decimal year
+                const jdToYear = (jd: number) => (jd - 2451545) / 365.25 + 2000; // JD 2451545 = 2000-01-01
+
+                const lastYear = jdToYear(jd);
+                const flybys = [];
+
+                // Generate 5 past + 1 future flyby estimates
+                for (let n = -5; n <= 1; n++) {
+                    flybys.push({
+                        comet_id: newRow.$id,
+                        year: lastYear + n * period,
+                        description: null,
+                        flagged: false,
+                        llm_model_used: null,
+                    });
+                }
+
+                // Insert flybys sequentially
+                for (const f of flybys) {
+                    await tablesDB.createRow({
+                        databaseId,
+                        tableId: flybyTableId,
+                        rowId: ID.unique(),
+                        data: f,
+                    });
+                }
+
+                log(`[addComet] Added ${flybys.length} flybys for comet ${summary.name}`);
+            } catch (flyErr) {
+                log(`[addComet] Failed to create flybys: ${flyErr}`);
+            }
+        }
+
 
         return ok(
             res,
