@@ -75,6 +75,10 @@ export default async ({ req, res, log, error }: any) => {
             perihelion_distance: val("q") ? parseFloat(val("q")) : null,
             period_years: val("per") ? parseFloat(val("per")) / 365.25 : null,
             last_perihelion_year: val("tp") ? parseFloat(val("tp")) : null, // store JD directly
+            // Orientation (degrees)
+            inclination_deg: val("i") ? parseFloat(val("i")) : null,
+            ascending_node_deg: val("om") ? parseFloat(val("om")) : null,
+            arg_periapsis_deg: val("w") ? parseFloat(val("w")) : null,
             source: nasaData.signature?.source ?? "NASA/JPL SBDB",
         };
 
