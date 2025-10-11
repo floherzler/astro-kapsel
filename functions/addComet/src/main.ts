@@ -14,11 +14,6 @@ function fail(res: any, msg: string, status = 400, extra: Record<string, unknown
 
 export default async ({ req, res, log, error }: any) => {
     try {
-        // --- Auth check ---
-        const callerId: string | undefined =
-            req.headers["x-appwrite-user-id"] ?? req.headers["X-Appwrite-User-Id"];
-        if (!callerId) return fail(res, "Unauthenticated: missing x-appwrite-user-id header", 401);
-
         // --- Parse body ---
         let body: Body = {};
         try {
