@@ -1,5 +1,5 @@
 import * as sdk from "npm:node-appwrite";
-const { Client, TablesDB, ID } = sdk;
+const { Client, TablesDB, ID, Query } = sdk;
 
 type Body = {
     cometID?: string; // e.g. "1P" or "1P/Halley"
@@ -108,8 +108,11 @@ export default async ({ req, res, log, error }: any) => {
             const existing = await tablesDB.listRows({
                 databaseId,
                 tableId: cometsTableId,
-                queries: [`equal("designation", "${summary.designation}")`],
+                queries: [
+                    Query.equal("designation", summary.designation)
+                ]
             });
+
             if (existing.total > 0) {
                 log(`[addComet] Comet ${summary.designation} already exists`);
                 return ok(res, {
