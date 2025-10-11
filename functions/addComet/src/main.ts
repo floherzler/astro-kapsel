@@ -105,7 +105,7 @@ export default async ({ req, res, log, error }: any) => {
 
         // --- Prevent duplicates ---
         try {
-            const existing = await tablesDB.listDocuments({
+            const existing = await tablesDB.listRows({
                 databaseId,
                 tableId: cometsTableId,
                 queries: [`equal("designation", "${summary.designation}")`],
@@ -115,7 +115,7 @@ export default async ({ req, res, log, error }: any) => {
                 return ok(res, {
                     success: true,
                     message: `Comet ${summary.name} already exists`,
-                    comet: existing.documents[0],
+                    comet: existing.rows[0],
                 });
             }
         } catch (checkErr) {
