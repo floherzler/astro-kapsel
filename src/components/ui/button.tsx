@@ -3,7 +3,7 @@
 import * as React from "react";
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "default" | "secondary" | "ghost";
+  variant?: "default" | "secondary" | "ghost" | "space";
   size?: "sm" | "md" | "lg";
 };
 
@@ -17,6 +17,8 @@ export function Button({
     default: "bg-accent text-black hover:brightness-110",
     secondary: "bg-white/10 text-white hover:bg-white/15",
     ghost: "bg-transparent hover:bg-white/10",
+    space:
+      "text-white bg-white/10 border border-white/20 backdrop-blur-sm hover:bg-white/15 shadow-[0_0_14px_rgba(110,203,255,0.25)] focus:ring-2 focus:ring-accent/40",
   };
   const sizes: Record<string, string> = {
     sm: "px-3 py-2 text-sm rounded-md",
@@ -33,4 +35,3 @@ export function Button({
 }
 
 export default Button;
-

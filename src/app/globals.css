@@ -84,3 +84,33 @@ body {
   background: var(--background);
   color: var(--foreground);
 }
+
+/* Comet success animation for the Add button */
+.comet-fx {
+  position: absolute;
+  left: -10%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  transform: translateY(-50%);
+  background: radial-gradient(circle at 30% 30%, #fff, #bfe6ff 50%, var(--color-accent));
+  box-shadow: 0 0 10px #8ad9ff, 0 0 20px #58c0ff88;
+  animation: comet-fly 1.1s ease-out forwards;
+}
+.comet-fx::after {
+  content: "";
+  position: absolute;
+  right: 100%;
+  top: 50%;
+  height: 2px;
+  width: 120px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent, #6ecbff88, #6ecbff22);
+  filter: blur(1px);
+}
+@keyframes comet-fly {
+  0%   { left: -10%; opacity: 0; }
+  10%  { opacity: 1; }
+  100% { left: 120%; opacity: 0; }
+}

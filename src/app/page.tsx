@@ -1,43 +1,9 @@
 "use client";
-
-import { useState } from "react";
-import { Functions } from "appwrite";
-import client from "@/lib/appwrite";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import CometList from "@/components/comet-list";
 import OrbitView3D from "@/components/orbit-view-3d";
 
 export default function Home() {
-  const [value, setValue] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const cometID = value.trim();
-    if (!cometID) return;
-    setLoading(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const functionId =
-        (process.env.APPWRITE_ADD_COMET as string | undefined) ||
-        (process.env.NEXT_PUBLIC_APPWRITE_ADD_COMET as string | undefined);
-      if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
-
-      const functions = new Functions(client);
-      const exec = await functions.createExecution({ functionId: functionId, body: JSON.stringify({ cometID }) });
-      setMessage(exec.status === "completed" ? "Request sent to add comet." : `Execution status: ${exec.status}`);
-      setValue("");
-    } catch (err: unknown) {
-      setError(String((err as Error)?.message ?? err));
-    } finally {
-      setLoading(false);
-    }
-  }
+  // Page-level state remains minimal; form moved into CometList
 
   return (
     <div className="min-h-dvh relative">
@@ -52,28 +18,7 @@ export default function Home() {
           <a className="underline hover:opacity-90" href="https://ssd.jpl.nasa.gov/tools/sbdb_query.html" target="_blank" rel="noreferrer noopener">NASA SBDB</a>.
         </p>
 
-        <Card className="mt-6">
-          <CardHeader>
-            <CardTitle>Add Comet</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={onSubmit} className="flex flex-col sm:flex-row gap-3">
-              <Input
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                placeholder='e.g. "1P" or "1P/Halley"'
-                aria-label="Comet ID"
-              />
-              <Button type="submit" disabled={loading} size="lg">
-                {loading ? "Submitting…" : "Submit"}
-              </Button>
-            </form>
-
-            {message && <p className="mt-3 text-sm text-emerald-300/90">{message}</p>}
-            {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
-          </CardContent>
-        </Card>
-
+        {/* Orbits first */}
         <OrbitView3D />
 
         <CometList />
