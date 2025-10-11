@@ -100,7 +100,7 @@ export default async ({ req, res, log, error }: any) => {
 
         const tablesDB = new TablesDB(client);
 
-        const databaseId = Deno.env.get("APPWRITE_DATABASE_ID") ?? "";
+        const databaseId = Deno.env.get("APPWRITE_DATABASE_ID") ?? "astroDB";
         const cometsTableId = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
 
         // --- Prevent duplicates ---
@@ -123,12 +123,12 @@ export default async ({ req, res, log, error }: any) => {
         }
 
         // --- Insert into Appwrite ---
-        let newDoc;
+        let newRow;
         try {
-            newDoc = await tablesDB.createDocument({
+            newRow = await tablesDB.createRow({
                 databaseId,
                 tableId: cometsTableId,
-                documentId: ID.unique(),
+                rowId: ID.unique(),
                 data: summary,
             });
         } catch (insertErr) {
@@ -140,8 +140,8 @@ export default async ({ req, res, log, error }: any) => {
 
         return ok(res, {
             success: true,
-            message: `Comet ${summary.name} added successfully!`,
-            comet: newDoc,
+            message: `☄️ Comet ${summary.name} added successfully!`,
+            comet: newRow,
         }, 201);
     } catch (e: any) {
         const msg = String(e?.message ?? e);
