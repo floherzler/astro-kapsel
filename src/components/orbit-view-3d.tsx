@@ -37,7 +37,7 @@ function solveKeplerEllipse(M: number, e: number): number {
   return E;
 }
 
-export default function OrbitView3D() {
+export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
   const [rows, setRows] = useState<CometRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -230,7 +230,10 @@ export default function OrbitView3D() {
     }
 
     // Scaling based on max semi-major axis among comets and planets
-    const valid = rows.filter((r) => (r.semi_major_axis ?? null) && (r.eccentricity ?? null));
+    const idsSet = onlyIds && onlyIds.length > 0 ? new Set(onlyIds) : null;
+    const valid = rows
+      .filter((r) => (r.semi_major_axis ?? null) && (r.eccentricity ?? null))
+      .filter((r) => (idsSet ? idsSet.has(r.$id) : true));
     const maxAComets = valid.reduce((m, r) => Math.max(m, r.semi_major_axis || 0), 1);
     const maxAPlanets = showPlanets ? 30.1 : 0; // up to Neptune's ~30 AU
     const maxAKuiper = showKuiper ? 50 : 0;
@@ -392,6 +395,29 @@ export default function OrbitView3D() {
           marker.userData = { label: r.name || r.designation || r.$id };
           group.add(marker);
           interactives.push(marker);
+
+          // Ion tail: tapered, pointing away from the Sun
+          // Length scales inversely with heliocentric distance (longer nearer the Sun)
+          const away = pos.clone().normalize();
+          const rAU = pos.length() / Math.max(1e-6, unitsPerAU); // rough distance in AU (scene-scaled)
+          const length = Math.max(10, unitsPerAU * (0.6 + 1.8 / Math.max(0.2, rAU)));
+          const topRadius = 0.2; // near the nucleus
+          const bottomRadius = Math.min(3.0, 0.4 + 1.2 / Math.max(0.2, rAU));
+          const tailGeom = new THREE.CylinderGeometry(topRadius, bottomRadius, length, 12, 1, true);
+          const tailMat = new THREE.MeshBasicMaterial({
+            color: 0x81d4fa,
+            transparent: true,
+            opacity: 0.35,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+          });
+          const tail = new THREE.Mesh(tailGeom, tailMat);
+          // Orient cylinder Y-axis along 'away'
+          const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), away);
+          tail.quaternion.copy(quat);
+          // Position so the narrow end sits at the comet position
+          tail.position.copy(pos.clone().add(away.clone().multiplyScalar(length / 2)));
+          group.add(tail);
         }
       }
     }
@@ -399,7 +425,7 @@ export default function OrbitView3D() {
     scene.add(group);
     orbitsGroupRef.current = group;
     interactivesRef.current = interactives;
-  }, [rows, showPlanets, showKuiper]);
+  }, [rows, showPlanets, showKuiper, onlyIds]);
 
   return (
     <Card className="mt-6">

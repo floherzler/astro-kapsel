@@ -17,7 +17,7 @@ type CometRow = {
   source?: string | null;
 };
 
-export default function CometList() {
+export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids: string[]) => void }) {
   const [comets, setComets] = useState<CometRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -120,6 +120,7 @@ export default function CometList() {
         });
       }
       setComets(rows);
+      if (onVisibleChange) onVisibleChange(rows.map((r) => r.$id));
     } catch (e: unknown) {
       setListError(String((e as Error)?.message ?? e));
     } finally {

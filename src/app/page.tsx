@@ -1,9 +1,11 @@
 "use client";
 import CometList from "@/components/comet-list";
 import OrbitView3D from "@/components/orbit-view-3d";
+import { useState } from "react";
 
 export default function Home() {
-  // Page-level state remains minimal; form moved into CometList
+  // Share visible IDs between list and 3D orbits
+  const [visibleCometIds, setVisibleCometIds] = useState<string[] | null>(null);
 
   return (
     <div className="min-h-dvh relative">
@@ -19,9 +21,9 @@ export default function Home() {
         </p>
 
         {/* Orbits first */}
-        <OrbitView3D />
+        <OrbitView3D onlyIds={visibleCometIds ?? undefined} />
 
-        <CometList />
+        <CometList onVisibleChange={setVisibleCometIds} />
 
       </main>
     </div>
