@@ -1,8 +1,5 @@
-import {
-    Client,
-    TablesDB,
-    ID,
-} from "https://deno.land/x/appwrite@7.0.0/mod.ts";
+import * as sdk from "npm:node-appwrite";
+const { Client, TablesDB, ID } = sdk;
 
 type Body = {
     cometID?: string; // e.g. "1P" or "1P/Halley"
