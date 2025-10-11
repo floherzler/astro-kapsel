@@ -14,7 +14,7 @@ export default async function getOrCreateDB() {
     try {
         await tablesDB.get({ databaseId });
         console.log("Database connected!");
-    } catch (error: unknown) {
+    } catch {
         try {
             await tablesDB.create({
                 databaseId,
