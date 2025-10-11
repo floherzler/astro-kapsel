@@ -16,12 +16,36 @@ export default async ({ req, res, log, error }: any) => {
     try {
         // --- Parse body ---
         let body: Body = {};
+
         try {
+            // First try standard JSON parse
             body = await req.json();
+            log(`[addComet] Parsed JSON body keys: ${Object.keys(body).join(',')}`);
         } catch {
-            log("[addComet] No JSON body provided");
+            log("[addComet] req.json() failed, trying fallback...");
+
+            // Fallback 1: bodyText (Appwrite Functions v7)
+            if (typeof req.bodyText === 'string' && req.bodyText.length > 0) {
+                try {
+                    body = JSON.parse(req.bodyText);
+                    log(`[addComet] Parsed bodyText JSON keys: ${Object.keys(body).join(',')}`);
+                } catch {
+                    log("[addComet] bodyText is not valid JSON");
+                }
+            }
+
+            // Fallback 2: payload/raw (legacy or console test)
+            else if (typeof req.payload === 'string' && req.payload.length > 0) {
+                try {
+                    body = JSON.parse(req.payload);
+                    log(`[addComet] Parsed payload JSON keys: ${Object.keys(body).join(',')}`);
+                } catch {
+                    log("[addComet] payload is not valid JSON");
+                }
+            }
         }
 
+        // Check cometID
         if (!body?.cometID) {
             return fail(res, "Missing required field: cometID");
         }
