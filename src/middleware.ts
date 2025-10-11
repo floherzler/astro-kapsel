@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import getOrCreateDB from "./models/server/setupDB";
 
-export async function middleware(request: NextRequest) {
+export async function middleware() {
     return NextResponse.next();
 }
 

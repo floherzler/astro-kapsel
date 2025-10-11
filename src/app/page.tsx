@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import CometList from "@/components/comet-list";
+import OrbitView3D from "@/components/orbit-view-3d";
 
 export default function Home() {
   const [value, setValue] = useState("");
@@ -31,8 +32,8 @@ export default function Home() {
       const exec = await functions.createExecution({ functionId: functionId, body: JSON.stringify({ cometID }) });
       setMessage(exec.status === "completed" ? "Request sent to add comet." : `Execution status: ${exec.status}`);
       setValue("");
-    } catch (err: any) {
-      setError(String(err?.message ?? err));
+    } catch (err: unknown) {
+      setError(String((err as Error)?.message ?? err));
     } finally {
       setLoading(false);
     }
@@ -72,6 +73,8 @@ export default function Home() {
             {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
           </CardContent>
         </Card>
+
+        <OrbitView3D />
 
         <CometList />
 

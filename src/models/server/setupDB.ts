@@ -1,19 +1,27 @@
 import { tablesDB } from "./config";
 
+function getErrorCode(err: unknown): number | undefined {
+    if (typeof err === "object" && err !== null && "code" in err) {
+        const code = (err as { code?: unknown }).code;
+        return typeof code === "number" ? code : undefined;
+    }
+    return undefined;
+}
+
 export default async function getOrCreateDB() {
     const databaseId = process.env.APPWRITE_DATABASE_ID!;
 
     try {
         await tablesDB.get({ databaseId });
         console.log("Database connected!");
-    } catch (error) {
+    } catch (error: unknown) {
         try {
             await tablesDB.create({
                 databaseId,
                 name: "astroDB",
             });
             console.log("Database created");
-        } catch (err) {
+        } catch (err: unknown) {
             console.error("Error creating database:", err);
             return;
         }
@@ -45,15 +53,16 @@ export default async function getOrCreateDB() {
         await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "ascending_node_deg", required: false });
         await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "arg_periapsis_deg", required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "source", size: 255, required: false });
-    } catch (err: any) {
-        if (err.code === 409) console.log("Comets table already exists");
+    } catch (err: unknown) {
+        const code = getErrorCode(err);
+        if (code === 409) console.log("Comets table already exists");
         else console.error("Error creating comets table:", err);
     }
 
     // Try to add missing orientation columns for existing installs
-    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "inclination_deg", required: false }); } catch (e: any) { if (e.code !== 409) console.warn("inclination_deg add failed", e); }
-    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "ascending_node_deg", required: false }); } catch (e: any) { if (e.code !== 409) console.warn("ascending_node_deg add failed", e); }
-    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "arg_periapsis_deg", required: false }); } catch (e: any) { if (e.code !== 409) console.warn("arg_periapsis_deg add failed", e); }
+    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "inclination_deg", required: false }); } catch (e: unknown) { const code = getErrorCode(e); if (code !== 409) console.warn("inclination_deg add failed", e); }
+    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "ascending_node_deg", required: false }); } catch (e: unknown) { const code = getErrorCode(e); if (code !== 409) console.warn("ascending_node_deg add failed", e); }
+    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "arg_periapsis_deg", required: false }); } catch (e: unknown) { const code = getErrorCode(e); if (code !== 409) console.warn("arg_periapsis_deg add failed", e); }
 
     // 2️⃣ Flybys Table
     try {
@@ -71,8 +80,9 @@ export default async function getOrCreateDB() {
         await tablesDB.createStringColumn({ databaseId, tableId: "flybys", key: "description", size: 255, required: false });
         await tablesDB.createBooleanColumn({ databaseId, tableId: "flybys", key: "flagged", required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "flybys", key: "llm_model_used", size: 255, required: false });
-    } catch (err: any) {
-        if (err.code === 409) console.log("Flybys table already exists");
+    } catch (err: unknown) {
+        const code = getErrorCode(err);
+        if (code === 409) console.log("Flybys table already exists");
         else console.error("Error creating flybys table:", err);
     }
 
@@ -92,8 +102,9 @@ export default async function getOrCreateDB() {
         await tablesDB.createFloatColumn({ databaseId, tableId: "sightings", key: "geo_lat", required: false });
         await tablesDB.createFloatColumn({ databaseId, tableId: "sightings", key: "geo_lon", required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "sightings", key: "note", size: 255, required: false });
-    } catch (err: any) {
-        if (err.code === 409) console.log("Sightings table already exists");
+    } catch (err: unknown) {
+        const code = getErrorCode(err);
+        if (code === 409) console.log("Sightings table already exists");
         else console.error("Error creating sightings table:", err);
     }
 

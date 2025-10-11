@@ -31,9 +31,9 @@ export default function CometList() {
       try {
         // Initial load
         const res = await tables.listRows({ databaseId, tableId, queries: [Query.limit(50)] });
-        setComets(res.rows as any);
-      } catch (e: any) {
-        setError(String(e?.message ?? e));
+        setComets(res.rows as CometRow[]);
+      } catch (e) {
+        setError(String((e as Error)?.message ?? e));
       } finally {
         setLoading(false);
       }
@@ -42,9 +42,9 @@ export default function CometList() {
         // Subscribe to realtime changes on this table
         unsub = client.subscribe(
           `databases.${databaseId}.tables.${tableId}.rows`,
-          (event: any) => {
+          (event: { events?: string[]; payload?: CometRow }) => {
             const type: string = event.events?.[0] ?? "";
-            const row: CometRow | undefined = event.payload as any;
+            const row: CometRow | undefined = event.payload;
             if (!row?.$id) return;
 
             setComets((prev) => {
