@@ -1,26 +1,86 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #03060c;
+  --foreground: #e6f1ff;
+  --space-accent: #6ecbff;
+  --space-nebula: #a78bfa;
+  --space-aurora: #34d399;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--space-accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #03060c;
+    --foreground: #e6f1ff;
   }
+}
+
+/* Starfield background */
+.starfield {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 800px at 80% -10%, color-mix(in oklab, var(--space-nebula) 20%, transparent), transparent 60%),
+    radial-gradient(900px 600px at 10% 110%, color-mix(in oklab, var(--space-aurora) 14%, transparent), transparent 60%),
+    linear-gradient(180deg, #02040a 0%, #070a14 100%);
+}
+.starfield::before,
+.starfield::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-repeat: repeat;
+  animation: drift 120s linear infinite;
+}
+.starfield::before {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, #ffffff99 60%, transparent 61%),
+    radial-gradient(1px 1px at 80% 20%, #ffffff66 60%, transparent 61%),
+    radial-gradient(1px 1px at 60% 70%, #ffffff99 60%, transparent 61%),
+    radial-gradient(1px 1px at 30% 80%, #ffffff66 60%, transparent 61%);
+  background-size: 600px 600px;
+  filter: drop-shadow(0 0 2px #9cd2ff);
+}
+.starfield::after {
+  background-image:
+    radial-gradient(2px 2px at 10% 40%, #c3e6ffcc 60%, transparent 61%),
+    radial-gradient(2px 2px at 70% 60%, #c3e6ff88 60%, transparent 61%),
+    radial-gradient(2px 2px at 40% 20%, #ffffffaa 60%, transparent 61%);
+  background-size: 900px 900px;
+  animation-duration: 180s;
+  opacity: 0.6;
+}
+
+@keyframes drift {
+  from { transform: translateY(0); }
+  to { transform: translateY(-200px); }
+}
+
+/* Orbit ring and glow */
+.orbit-ring {
+  position: relative;
+  border-radius: 9999px;
+  border: 1px dashed color-mix(in oklab, var(--space-accent) 60%, transparent);
+  box-shadow: 0 0 20px color-mix(in oklab, var(--space-accent) 24%, transparent) inset;
+}
+.comet-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 30% 30%, #fff, #bfe6ff 40%, #6ecbff 70%);
+  box-shadow: 0 0 8px #89d8ff, 0 0 16px #58c0ff88;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }

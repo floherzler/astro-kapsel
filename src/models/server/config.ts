@@ -1,7 +1,4 @@
 import { Avatars, Client, Databases, TablesDB, Storage, Users } from "node-appwrite"
-import dotenv from "dotenv"
-
-dotenv.config();
 
 let client = new Client();
 
