@@ -40,11 +40,20 @@ export default async function getOrCreateDB() {
         await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "perihelion_distance", required: false });
         await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "period_years", required: false });
         await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "last_perihelion_year", required: false });
+        // Orientation columns (degrees)
+        await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "inclination_deg", required: false });
+        await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "ascending_node_deg", required: false });
+        await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "arg_periapsis_deg", required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "source", size: 255, required: false });
     } catch (err: any) {
         if (err.code === 409) console.log("Comets table already exists");
         else console.error("Error creating comets table:", err);
     }
+
+    // Try to add missing orientation columns for existing installs
+    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "inclination_deg", required: false }); } catch (e: any) { if (e.code !== 409) console.warn("inclination_deg add failed", e); }
+    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "ascending_node_deg", required: false }); } catch (e: any) { if (e.code !== 409) console.warn("ascending_node_deg add failed", e); }
+    try { await tablesDB.createFloatColumn({ databaseId, tableId: "comets", key: "arg_periapsis_deg", required: false }); } catch (e: any) { if (e.code !== 409) console.warn("arg_periapsis_deg add failed", e); }
 
     // 2️⃣ Flybys Table
     try {
