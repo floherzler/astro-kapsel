@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type CometRow = {
   $id: string;
@@ -20,7 +21,16 @@ type CometRow = {
   source?: string | null;
 };
 
-export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids: string[]) => void }) {
+type CometListVariant = "default" | "compact";
+
+export default function CometList({
+  onVisibleChange,
+  variant = "default",
+}: {
+  onVisibleChange?: (ids: string[]) => void;
+  variant?: CometListVariant;
+}) {
+  const isCompact = variant === "compact";
   const [comets, setComets] = useState<CometRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -402,85 +412,151 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
     return () => clearTimeout(t);
   }, [submitError]);
 
+  const renderedList = (items: CometRow[]) => (
+    <Accordion className="space-y-2">
+      {items.map((c) => {
+        const info = lastNextPerihelion(c.last_perihelion_year ?? null, c.period_years ?? null);
+        const nextJD = nextPerihelionJD(c.last_perihelion_year ?? null, c.period_years ?? null);
+        const countdown = formatCountdown(nextJD);
+        const header = (open: boolean) => (
+          <div
+            className={`group rounded-md border border-transparent bg-[#0b1020]/60 hover:bg-[#0b1020]/80 transition-colors`}
+            style={countdown.rowStyle}
+          >
+            <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 items-center gap-2">
+                <span aria-hidden className={`text-foreground/60 transition-transform select-none ${open ? "rotate-90" : ""}`}>▸</span>
+                <div className="min-w-0">
+                  <div className="font-medium truncate">{c.name ?? c.designation ?? c.$id}</div>
+                  <div className="mt-1 text-[11px] text-foreground/60">
+                    {typeof c.period_years === "number" ? `Period ≈ ${c.period_years.toFixed(2)}y` : "Period unknown"}
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-right">
+                <span className="text-xs text-foreground/60">Countdown</span>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs border ${countdown.className}`}>
+                  {countdown.label}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+        return (
+          <AccordionItem key={c.$id} header={header}>
+            <div className="space-y-4 rounded-md border border-accent/20 bg-[#0b1020]/70 px-4 py-4 shadow-[0_0_12px_rgba(110,203,255,0.12)]">
+              <div className="grid grid-cols-1 gap-3 text-xs text-foreground/70 sm:grid-cols-2">
+                <div>
+                  <div className="uppercase tracking-[0.3em] text-foreground/50">Orbit class</div>
+                  <div className="mt-1 text-sm text-foreground/80">{c.orbit_class ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-[0.3em] text-foreground/50">Source</div>
+                  <div className="mt-1 text-sm text-foreground/80">{c.source ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-[0.3em] text-foreground/50">Last perihelion</div>
+                  <div className="mt-1 text-sm text-foreground/80">{info.last ?? "—"}</div>
+                </div>
+                <div>
+                  <div className="uppercase tracking-[0.3em] text-foreground/50">Next perihelion</div>
+                  <div className="mt-1 text-sm text-foreground/80">{info.next ?? "—"}</div>
+                </div>
+              </div>
+              <div className="font-mono text-[11px] tracking-wide text-accent/80">
+                {">"} telemetry slot reserved for future flyby data
+              </div>
+            </div>
+          </AccordionItem>
+        );
+      })}
+    </Accordion>
+  );
+
+  if (isCompact) {
+    return (
+      <div className="flex h-full flex-col px-2 pb-2 pt-1 text-[11px] text-foreground/80">
+        <ScrollArea className="h-full" viewportClassName="max-h-[10.5rem] pr-1">
+          {renderedList(comets)}
+        </ScrollArea>
+      </div>
+    );
+  }
+
   return (
     <Card className="mt-8">
       <CardHeader>
         <CardTitle>Comets</CardTitle>
       </CardHeader>
       <CardContent>
-        {/* Orbit groups (tabs) + duration slider */}
-        <div className="mb-4 flex flex-col gap-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-sm text-foreground/80">Orbit group</div>
-          </div>
-          <div className="inline-flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              className={`px-3 py-1.5 rounded text-sm transition-colors border ${selectedClasses.length === 0
-                ? "bg-accent text-black border-accent/60 shadow-[0_0_12px_rgba(255,255,255,0.25)]"
-                : "text-foreground/80 hover:bg-white/10 border-white/15"
+        <div className="mb-4 space-y-3">
+          <div className="space-y-2">
+            <div className="text-xs uppercase tracking-[0.35em] text-slate-300/70">Orbit groups</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${
+                  selectedClasses.length === 0
+                    ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
+                    : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
                 }`}
-              onClick={() => setSelectedClasses([])}
-              title="Show all orbit classes"
-            >
-              All
-            </button>
-            <ToggleGroup type="multiple" value={selectedClasses} onValueChange={(v) => setSelectedClasses(v as string[])}>
-              {orbitClasses.map((c) => (
-                <ToggleGroupItem key={c} value={c} title={c}>
-                  {c}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                onClick={() => setSelectedClasses([])}
+              >
+                All
+              </button>
+              <ToggleGroup
+                type="multiple"
+                value={selectedClasses}
+                onValueChange={(v) => setSelectedClasses(v as string[])}
+                className="flex flex-wrap gap-2"
+              >
+                {orbitClasses.map((c) => (
+                  <ToggleGroupItem
+                    key={c}
+                    value={c}
+                    title={c}
+                    className="rounded-full border border-slate-700/60 px-3 py-1.5 text-xs uppercase tracking-[0.3em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100"
+                  >
+                    {c}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
           </div>
-          <div className="text-xs text-foreground/70">
-            {selectedClasses.length === 0 && "Showing all orbit classes."}
-            {selectedClasses.length === 1 && (
-              <>
-                {ORBIT_INFO[normalizeClassName(selectedClasses[0])]?.short ?? `Filtering by orbit class: ${selectedClasses[0]}.`}
-                {ORBIT_INFO[normalizeClassName(selectedClasses[0])]?.url && (
-                  <>
-                    {" "}
-                    <a
-                      href={ORBIT_INFO[normalizeClassName(selectedClasses[0])]!.url}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="underline opacity-80 hover:opacity-100"
-                    >
-                      Learn more
-                    </a>
-                    .
-                  </>
-                )}
-              </>
-            )}
-            {selectedClasses.length > 1 && `Filtering ${selectedClasses.length} families.`}
-          </div>
-          <div className="text-sm text-foreground/80">Duration buckets</div>
-          <div className="inline-flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              className={`px-3 py-1.5 rounded text-sm transition-colors border ${selectedBuckets.length === 0
-                ? "bg-accent text-black border-accent/60 shadow-[0_0_12px_rgba(255,255,255,0.25)]"
-                : "text-foreground/80 hover:bg-white/10 border-white/15"
+          <div className="space-y-2">
+            <div className="text-xs uppercase tracking-[0.35em] text-slate-300/70">Duration buckets</div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${
+                  selectedBuckets.length === 0
+                    ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
+                    : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
                 }`}
-              onClick={() => setSelectedBuckets([])}
-              title="Show all durations"
-            >
-              All
-            </button>
-            <ToggleGroup type="multiple" value={selectedBuckets} onValueChange={(v) => setSelectedBuckets(v as string[])}>
-              {DURATION_BUCKETS.map((b) => (
-                <ToggleGroupItem key={b.key} value={b.key} title={b.label}>
-                  {b.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+                onClick={() => setSelectedBuckets([])}
+              >
+                All
+              </button>
+              <ToggleGroup
+                type="multiple"
+                value={selectedBuckets}
+                onValueChange={(v) => setSelectedBuckets(v as string[])}
+                className="flex flex-wrap gap-2"
+              >
+                {DURATION_BUCKETS.map((b) => (
+                  <ToggleGroupItem
+                    key={b.key}
+                    value={b.key}
+                    title={b.label}
+                    className="rounded-full border border-slate-700/60 px-3 py-1.5 text-xs uppercase tracking-[0.3em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100"
+                  >
+                    {b.label}
+                  </ToggleGroupItem>
+                ))}
+              </ToggleGroup>
+            </div>
           </div>
-          {/* No Reset button; use the All toggles to clear filters */}
         </div>
-
-        {/* Top row: compact add-comet form */}
         <form onSubmit={onSubmit} className="mb-4 flex gap-2">
           <Input
             value={submitValue}
@@ -510,7 +586,6 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
         {!loading && !listError && comets.length === 0 && (
           <p className="text-sm text-foreground/70">No comets yet. Add one above.</p>
         )}
-        {/* Sort controls */}
         <div className="mb-3 flex items-center gap-3 text-xs text-foreground/70">
           <span>Sort:</span>
           <Dropdown
@@ -534,56 +609,7 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
             <span>{sortDir === "asc" ? "▲" : "▼"}</span>
           </button>
         </div>
-
-        <Accordion className="space-y-2">
-          {comets.map((c) => {
-            const info = lastNextPerihelion(c.last_perihelion_year ?? null, c.period_years ?? null);
-            const nextJD = nextPerihelionJD(c.last_perihelion_year ?? null, c.period_years ?? null);
-            const countdown = formatCountdown(nextJD);
-            const header = (open: boolean) => (
-              <div
-                className={`group rounded-md border border-transparent bg-[#0b1020]/60 hover:bg-[#0b1020]/80 transition-colors`}
-                style={countdown.rowStyle}
-              >
-                <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-4 items-center">
-                  <div className="sm:col-span-2 min-w-0">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span aria-hidden className={`text-foreground/60 transition-transform select-none ${open ? 'rotate-90' : ''}`}>▸</span>
-                      <div className="font-medium truncate">{c.name ?? c.designation ?? c.$id}</div>
-                    </div>
-                    <div className="mt-1 text-xs text-foreground/70 truncate">
-                      {c.orbit_class ? <span className="mr-2">Family: {c.orbit_class}</span> : null}
-                      {typeof c.period_years === 'number' ? <span>P≈{c.period_years.toFixed(2)}y</span> : null}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-foreground/60">Last perihelion</div>
-                    <div className="text-sm">{info.last ?? '—'}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-foreground/60">Next perihelion</div>
-                    <div className="text-sm">{info.next ?? '—'}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-foreground/60">Countdown</div>
-                    <div>
-                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs border ${countdown.className}`}>
-                        {countdown.label}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-            return (
-              <AccordionItem key={c.$id} header={header(false)}>
-                <div className="font-mono text-xs sm:text-sm tracking-wide text-accent/90 bg-[#0b1020]/60 border border-accent/20 rounded-md px-4 py-3 shadow-[0_0_12px_rgba(110,203,255,0.12)]">
-                  {">"} come back soon for sightings and flybys
-                </div>
-              </AccordionItem>
-            );
-          })}
-        </Accordion>
+        <ScrollArea className="max-h-[17rem] pr-1">{renderedList(comets)}</ScrollArea>
         <div className="mt-3 text-[10px] text-foreground/60">Orbital data source: NASA/JPL SBDB</div>
       </CardContent>
     </Card>

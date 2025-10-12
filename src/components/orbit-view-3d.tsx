@@ -37,7 +37,9 @@ function solveKeplerEllipse(M: number, e: number): number {
   return E;
 }
 
-export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
+type OrbitViewVariant = "default" | "compact";
+
+export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?: string[]; variant?: OrbitViewVariant }) {
   const [rows, setRows] = useState<CometRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -117,12 +119,13 @@ export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
     scene.background = new THREE.Color(0x000000);
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / 420, 0.1, 10000);
+    const targetHeight = variant === "compact" ? 200 : 420;
+    const camera = new THREE.PerspectiveCamera(45, container.clientWidth / targetHeight, 0.1, 10000);
     cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio ?? 1, 2));
-    renderer.setSize(container.clientWidth, 420);
+    renderer.setSize(container.clientWidth, targetHeight);
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
 
@@ -153,7 +156,7 @@ export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
     function onResize() {
       if (!container || !cameraRef.current || !rendererRef.current) return;
       const w = container.clientWidth;
-      const h = 420;
+      const h = variant === "compact" ? 200 : 420;
       cameraRef.current.aspect = w / h;
       cameraRef.current.updateProjectionMatrix();
       rendererRef.current.setSize(w, h);
@@ -211,7 +214,7 @@ export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
       renderer.domElement.removeEventListener("pointermove", onPointerMove);
       renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
     };
-  }, []);
+  }, [variant]);
 
   // Build orbits whenever rows change
   useEffect(() => {
@@ -238,7 +241,8 @@ export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
     const maxAPlanets = showPlanets ? 30.1 : 0; // up to Neptune's ~30 AU
     const maxAKuiper = showKuiper ? 50 : 0;
     const maxA = Math.max(maxAComets, maxAPlanets, maxAKuiper);
-    const unitsPerAU = Math.max(12, (200 /* half canvas height */) / Math.max(1, maxA));
+    const viewHeight = variant === "compact" ? 200 : 420;
+    const unitsPerAU = Math.max(12, (viewHeight * 0.45) / Math.max(1, maxA));
 
     const group = new THREE.Group();
     const nowJD = jdNow();
@@ -257,12 +261,12 @@ export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
     if (showPlanets) {
       const planets = [
         { name: "Mercury", a: 0.3871, e: 0.2056, i: 7.005, O: 48.331, w: 29.124, color: 0xb0bec5 },
-        { name: "Venus",   a: 0.7233, e: 0.0068, i: 3.395, O: 76.680, w: 54.884, color: 0xffcc80 },
-        { name: "Earth",   a: 1.0000, e: 0.0167, i: 0.000, O: -11.26064, w: 102.9372, color: 0x90caf9 },
-        { name: "Mars",    a: 1.5237, e: 0.0934, i: 1.850, O: 49.558, w: 286.502, color: 0xff8a65 },
+        { name: "Venus", a: 0.7233, e: 0.0068, i: 3.395, O: 76.680, w: 54.884, color: 0xffcc80 },
+        { name: "Earth", a: 1.0000, e: 0.0167, i: 0.000, O: -11.26064, w: 102.9372, color: 0x90caf9 },
+        { name: "Mars", a: 1.5237, e: 0.0934, i: 1.850, O: 49.558, w: 286.502, color: 0xff8a65 },
         { name: "Jupiter", a: 5.2044, e: 0.0489, i: 1.303, O: 100.464, w: 273.867, color: 0xfff59d },
-        { name: "Saturn",  a: 9.5826, e: 0.0565, i: 2.485, O: 113.665, w: 339.392, color: 0xa1887f },
-        { name: "Uranus",  a: 19.201, e: 0.0472, i: 0.773, O: 74.006, w: 96.998, color: 0x80deea },
+        { name: "Saturn", a: 9.5826, e: 0.0565, i: 2.485, O: 113.665, w: 339.392, color: 0xa1887f },
+        { name: "Uranus", a: 19.201, e: 0.0472, i: 0.773, O: 74.006, w: 96.998, color: 0x80deea },
         { name: "Neptune", a: 30.047, e: 0.0086, i: 1.770, O: 131.784, w: 273.187, color: 0x81d4fa },
       ];
       for (const p of planets) {
@@ -425,33 +429,75 @@ export default function OrbitView3D({ onlyIds }: { onlyIds?: string[] }) {
     scene.add(group);
     orbitsGroupRef.current = group;
     interactivesRef.current = interactives;
-  }, [rows, showPlanets, showKuiper, onlyIds]);
+  }, [rows, showPlanets, showKuiper, onlyIds, variant]);
+
+  const controls = (
+    <div className="flex items-center gap-3 text-xs text-foreground/80">
+      <Switch
+        label="Planets"
+        checked={showPlanets}
+        onCheckedChange={setShowPlanets}
+        className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-cyan-200/80"
+      />
+      <Switch
+        label="Kuiper Belt"
+        checked={showKuiper}
+        onCheckedChange={setShowKuiper}
+        className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-cyan-200/80"
+      />
+    </div>
+  );
+
+  const canvasWrapper = (
+    <div ref={wrapRef} className="relative w-full" style={{ height: variant === "compact" ? 200 : 420 }}>
+      {tooltip && (
+        <div className="pointer-events-none absolute z-20" style={{ left: tooltip.x, top: tooltip.y }}>
+          <Badge>{tooltip.label}</Badge>
+        </div>
+      )}
+    </div>
+  );
+
+  if (variant === "compact") {
+    return (
+      <div className="flex h-full flex-col gap-4">
+        {/* <div className="rounded-[1.4rem] border border-slate-800/70 bg-slate-950/75 px-4 py-3 text-[11px] uppercase tracking-[0.45em] text-cyan-100 shadow-[0_18px_45px_-40px_rgba(59,130,246,0.55)]">
+          Orbits
+        </div> */}
+        <div className="relative flex-1 overflow-hidden rounded-[1.6rem] border border-slate-800/70 bg-slate-950/80">
+          {canvasWrapper}
+          {loading && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 text-xs uppercase tracking-[0.35em] text-foreground/70">
+              Loading orbits…
+            </div>
+          )}
+          {error && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/40 text-xs text-red-400">
+              {error}
+            </div>
+          )}
+          {!loading && !error && rows.length === 0 && (
+            <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/30 text-xs text-foreground/60">
+              No comets to render.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Card className="mt-6">
       <CardHeader>
         <div className="flex items-center justify-between gap-4">
           <CardTitle>Orbits (3D)</CardTitle>
-          <div className="flex items-center gap-4">
-            <Switch label="Planets" checked={showPlanets} onCheckedChange={setShowPlanets} />
-            <Switch label="Kuiper Belt" checked={showKuiper} onCheckedChange={setShowKuiper} />
-          </div>
+          {controls}
         </div>
       </CardHeader>
       <CardContent>
         {loading && <p className="text-sm text-foreground/70">Loading orbits…</p>}
         {error && <p className="text-sm text-red-400">{error}</p>}
-        <div ref={wrapRef} className="relative w-full" style={{ height: 420 }}>
-          {/* three.js canvas is injected here */}
-          {tooltip && (
-            <div
-              className="pointer-events-none absolute z-20"
-              style={{ left: tooltip.x, top: tooltip.y }}
-            >
-              <Badge>{tooltip.label}</Badge>
-            </div>
-          )}
-        </div>
+        {canvasWrapper}
         {!loading && !error && rows.length === 0 && (
           <p className="text-sm text-foreground/70 mt-2">No comets to render.</p>
         )}

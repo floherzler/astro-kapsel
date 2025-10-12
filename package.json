@@ -10,12 +10,16 @@
     "setup-db": "tsx scripts/setupDB.ts"
   },
   "dependencies": {
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.3.0",
     "appwrite": "^21.2.1",
     "dotenv": "^17.2.3",
+    "framer-motion": "^12.23.24",
     "next": "15.5.4",
     "node-appwrite": "^20.2.1",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-globe.gl": "^2.36.0",
     "three": "^0.160.1"
   },
   "devDependencies": {

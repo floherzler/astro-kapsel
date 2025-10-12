@@ -1,7 +1,8 @@
 "use client";
+import Link from "next/link";
+import { useState } from "react";
 import CometList from "@/components/comet-list";
 import OrbitView3D from "@/components/orbit-view-3d";
-import { useState } from "react";
 
 export default function Home() {
   // Share visible IDs between list and 3D orbits
@@ -19,6 +20,14 @@ export default function Home() {
           {" "}
           <a className="underline hover:opacity-90" href="https://ssd.jpl.nasa.gov/tools/sbdb_query.html" target="_blank" rel="noreferrer noopener">NASA SBDB</a>.
         </p>
+        <div className="mt-6">
+          <Link
+            href="/cockpit"
+            className="inline-flex rounded-full border border-white/20 bg-white/5 px-5 py-2 text-sm uppercase tracking-[0.3em] text-foreground/90 backdrop-blur hover:bg-white/10 hover:text-white"
+          >
+            Enter Cockpit
+          </Link>
+        </div>
 
         {/* Orbits first */}
         <OrbitView3D onlyIds={visibleCometIds ?? undefined} />

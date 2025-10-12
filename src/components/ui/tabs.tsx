@@ -45,6 +45,7 @@ export function TabsTrigger({ value, children, className = "", ...rest }: { valu
     <button
       type="button"
       onClick={() => ctx.setValue(value)}
+      data-state={active ? "active" : "inactive"}
       className={`px-3 py-1.5 rounded text-sm transition-colors ${
         active ? "bg-accent text-black shadow-[0_0_12px_rgba(255,255,255,0.25)]" : "text-foreground/80 hover:bg-white/10"
       } ${className}`}
