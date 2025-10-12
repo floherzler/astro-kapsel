@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, type CSSProperties } from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Query, Functions } from "appwrite";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Dropdown } from "@/components/ui/dropdown";
+import { Accordion, AccordionItem } from "@/components/ui/accordion";
 
 type CometRow = {
   $id: string;
@@ -14,6 +16,7 @@ type CometRow = {
   designation?: string | null;
   orbit_class?: string | null;
   period_years?: number | null;
+  last_perihelion_year?: number | null;
   source?: string | null;
 };
 
@@ -26,6 +29,8 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
   const [submitMsg, setSubmitMsg] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [blast, setBlast] = useState(false);
+  // trigger periodic re-render to keep countdown fresh
+  const [, setNowTick] = useState<number>(Date.now());
   const [orbitClasses, setOrbitClasses] = useState<string[]>([]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
   const DURATION_BUCKETS: { key: string; label: string; min?: number; max?: number }[] = [
@@ -40,6 +45,8 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   // inline info replaces button
   // filters apply in realtime
+  const [sortKey, setSortKey] = useState<"id" | "family" | "period" | "last" | "next" | "countdown">("countdown");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableId = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || "comets";
@@ -119,6 +126,7 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
           });
         });
       }
+      rows = sortRows(rows);
       setComets(rows);
       if (onVisibleChange) onVisibleChange(rows.map((r) => r.$id));
     } catch (e: unknown) {
@@ -208,6 +216,176 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
       setSubmitting(false);
     }
   }
+
+  // --- Helpers for perihelion timing ---
+  function jdNow(): number {
+    return Date.now() / 86400000 + 2440587.5;
+  }
+  function jdToDate(jd: number): Date {
+    const ms = (jd - 2440587.5) * 86400000;
+    return new Date(ms);
+  }
+  function formatDate(d: Date): string {
+    const y = d.getUTCFullYear();
+    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(d.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  function lastNextPerihelion(tpJD?: number | null, periodYears?: number | null): { last?: string; next?: string } {
+    if (!tpJD || !periodYears || periodYears <= 0) return {};
+    const Pdays = periodYears * 365.25;
+    const now = jdNow();
+    const k = Math.floor((now - tpJD) / Pdays);
+    let lastJD = tpJD + k * Pdays;
+    if (lastJD > now) lastJD -= Pdays;
+    const nextJD = lastJD + Pdays;
+    return { last: formatDate(jdToDate(lastJD)), next: formatDate(jdToDate(nextJD)) };
+  }
+
+  function nextPerihelionJD(tpJD?: number | null, periodYears?: number | null): number | null {
+    if (!tpJD || !periodYears || periodYears <= 0) return null;
+    const Pdays = periodYears * 365.25;
+    const now = jdNow();
+    const k = Math.floor((now - tpJD) / Pdays);
+    let lastJD = tpJD + k * Pdays;
+    if (lastJD > now) lastJD -= Pdays;
+    return lastJD + Pdays;
+  }
+
+  function lastPerihelionJD(tpJD?: number | null, periodYears?: number | null): number | null {
+    if (!tpJD || !periodYears || periodYears <= 0) return null;
+    const Pdays = periodYears * 365.25;
+    const now = jdNow();
+    const k = Math.floor((now - tpJD) / Pdays);
+    let lastJD = tpJD + k * Pdays;
+    if (lastJD > now) lastJD -= Pdays;
+    return lastJD;
+  }
+
+  function sortRows(rows: CometRow[]): CometRow[] {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const now = jdNow();
+    const keyVal = (r: CometRow): number | string => {
+      switch (sortKey) {
+        case "id":
+          return (r.designation ?? r.name ?? r.$id).toString().toLowerCase();
+        case "family":
+          return (r.orbit_class ?? "").toLowerCase();
+        case "period":
+          return typeof r.period_years === "number" ? r.period_years : Number(r.period_years ?? Number.POSITIVE_INFINITY);
+        case "last": {
+          const jd = lastPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
+          return jd ?? Number.NEGATIVE_INFINITY;
+        }
+        case "next": {
+          const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
+          return jd ?? Number.POSITIVE_INFINITY;
+        }
+        case "countdown": {
+          const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
+          return jd ? (jd - now) : Number.POSITIVE_INFINITY;
+        }
+        default:
+          return r.$id;
+      }
+    };
+    return [...rows].sort((a, b) => {
+      const va = keyVal(a);
+      const vb = keyVal(b);
+      if (typeof va === "string" && typeof vb === "string") return va.localeCompare(vb) * dir;
+      const na = Number(va);
+      const nb = Number(vb);
+      if (isNaN(na) && isNaN(nb)) return 0;
+      if (isNaN(na)) return 1;
+      if (isNaN(nb)) return -1;
+      if (na === nb) return 0;
+      return na < nb ? -1 * dir : 1 * dir;
+    });
+  }
+
+  function formatCountdown(nextJD: number | null): { label: string; className: string; rowStyle?: CSSProperties } {
+    if (!nextJD) return { label: "—", className: "bg-white/5 border-white/10 text-foreground/70" };
+    const now = jdNow();
+    const dtDays = nextJD - now;
+    // Extremely soon
+    if (dtDays <= 0.5) {
+      return {
+        label: "today",
+        className: "bg-gradient-to-br from-rose-500/40 to-orange-400/30 text-white border border-rose-400/50 shadow-[0_0_22px_rgba(255,107,107,0.35)]",
+        rowStyle: {
+          boxShadow: `0 0 26px rgba(255,107,107,0.35)`,
+          borderColor: `rgba(255,107,107,0.45)`,
+        },
+      };
+    }
+    // Choose nearest single unit (days, months, or years)
+    const days = Math.max(1, Math.round(dtDays));
+    const months = Math.max(1, Math.round(dtDays / 30.44));
+    const years = Math.max(1, Math.round(dtDays / 365.25));
+
+    // Thresholds: show days if < 32 days; months if >= 32 days and < ~6 months; years if >= ~6 months
+    let label = "";
+    if (dtDays >= 365.25 / 2) {
+      label = years === 1 ? "in 1 year" : `in ${years} years`;
+    } else if (dtDays >= 32) {
+      label = months === 1 ? "in 1 month" : `in ${months} months`;
+    } else {
+      label = days === 1 ? "in 1 day" : `in ${days} days`;
+    }
+
+    // Styling tiers by proximity
+    // Smooth row glow for <= 32 days: blend cool blue -> hot red
+    if (dtDays <= 32) {
+      const t = Math.max(0, Math.min(1, (32 - dtDays) / 32));
+      const r = Math.round(129 + (255 - 129) * t);
+      const g = Math.round(212 + (107 - 212) * t);
+      const b = Math.round(250 + (107 - 250) * t);
+      const alpha = 0.16 + 0.22 * t;
+      const rad = 14 + 12 * t;
+      return {
+        label,
+        className: dtDays <= 15
+          ? "bg-gradient-to-br from-rose-500/35 via-orange-400/25 to-amber-300/10 text-white border-transparent"
+          : dtDays <= 45
+          ? "bg-gradient-to-r from-orange-400/30 to-amber-300/15 text-white border-transparent"
+          : "bg-[#1a2238]/40 text-foreground/80 border border-[#344056]/40",
+        rowStyle: {
+          boxShadow: `0 0 ${rad}px rgba(${r},${g},${b},${alpha})`,
+          borderColor: `rgba(${r},${g},${b},${Math.min(0.45, 0.2 + 0.25 * t)})`,
+        },
+      };
+    }
+    if (dtDays <= 182.5) {
+      return {
+        label,
+        className: "bg-gradient-to-tr from-amber-400/25 to-amber-300/10 text-amber-100 border border-amber-300/30",
+        rowStyle: { boxShadow: `0 0 16px rgba(245,196,67,0.14)`, borderColor: `rgba(245,196,67,0.25)` },
+      };
+    }
+    if (dtDays <= 5 * 365.25) {
+      return {
+        label,
+        className: "bg-gradient-to-br from-accent/20 to-accent/5 text-accent border border-accent/30 shadow-[0_0_12px_rgba(110,203,255,0.2)]",
+        rowStyle: { boxShadow: `0 0 12px rgba(110,203,255,0.16)`, borderColor: `rgba(110,203,255,0.3)` },
+      };
+    }
+    return { label, className: "bg-[#1a2238]/40 border-[#344056]/40 text-foreground/80", rowStyle: undefined };
+  }
+
+  // tick every minute to keep countdowns fresh
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Resort on sort control changes
+  useEffect(() => {
+    if (comets.length === 0) return;
+    const sorted = sortRows(comets);
+    setComets(sorted);
+    if (onVisibleChange) onVisibleChange(sorted.map((r) => r.$id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortKey, sortDir]);
 
   // Auto-hide transient submit messages
   useEffect(() => {
@@ -329,21 +507,81 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
         {!loading && !listError && comets.length === 0 && (
           <p className="text-sm text-foreground/70">No comets yet. Add one above.</p>
         )}
-        <ul className="divide-y divide-white/10">
-          {comets.map((c) => (
-            <li key={c.$id} className="py-3 flex items-center justify-between">
-              <div>
-                <div className="font-medium">{c.name ?? c.designation ?? c.$id}</div>
-                <div className="text-xs text-foreground/70">
-                  {c.designation ? `${c.designation}` : ""}
-                  {c.orbit_class ? ` • ${c.orbit_class}` : ""}
-                  {c.period_years ? ` • P≈${Number(c.period_years).toFixed(2)}y` : ""}
+        {/* Sort controls */}
+        <div className="mb-3 flex items-center gap-3 text-xs text-foreground/70">
+          <span>Sort:</span>
+          <Dropdown
+            value={sortKey}
+            onChange={(v) => setSortKey((v as any) || "countdown")}
+            items={[
+              { value: "countdown", label: "Countdown" },
+              { value: "id", label: "ID" },
+              { value: "family", label: "Family" },
+              { value: "period", label: "Period" },
+              { value: "last", label: "Last Perihelion" },
+              { value: "next", label: "Next Perihelion" },
+            ]}
+          />
+          <button
+            type="button"
+            onClick={() => setSortDir((d) => (d === "asc" ? "desc" : "asc"))}
+            className="inline-flex items-center gap-1 rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 hover:bg-white/10"
+            title={sortDir === "asc" ? "Ascending" : "Descending"}
+          >
+            <span>{sortDir === "asc" ? "▲" : "▼"}</span>
+          </button>
+        </div>
+
+        <Accordion className="space-y-2">
+          {comets.map((c) => {
+            const info = lastNextPerihelion(c.last_perihelion_year ?? null, c.period_years ?? null);
+            const nextJD = nextPerihelionJD(c.last_perihelion_year ?? null, c.period_years ?? null);
+            const countdown = formatCountdown(nextJD);
+            const header = (open: boolean) => (
+              <div
+                className={`group rounded-md border border-transparent bg-[#0b1020]/60 hover:bg-[#0b1020]/80 transition-colors`}
+                style={countdown.rowStyle}
+              >
+                <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-4 items-center">
+                  <div className="sm:col-span-2 min-w-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span aria-hidden className={`text-foreground/60 transition-transform select-none ${open ? 'rotate-90' : ''}`}>▸</span>
+                      <div className="font-medium truncate">{c.name ?? c.designation ?? c.$id}</div>
+                    </div>
+                    <div className="mt-1 text-xs text-foreground/70 truncate">
+                      {c.orbit_class ? <span className="mr-2">Family: {c.orbit_class}</span> : null}
+                      {typeof c.period_years === 'number' ? <span>P≈{c.period_years.toFixed(2)}y</span> : null}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-foreground/60">Last perihelion</div>
+                    <div className="text-sm">{info.last ?? '—'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-foreground/60">Next perihelion</div>
+                    <div className="text-sm">{info.next ?? '—'}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-foreground/60">Countdown</div>
+                    <div>
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs border ${countdown.className}`}>
+                        {countdown.label}
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
-              {c.source && <span className="text-[10px] uppercase tracking-wide text-foreground/60">{c.source}</span>}
-            </li>
-          ))}
-        </ul>
+            );
+            return (
+              <AccordionItem key={c.$id} header={header}>
+                <div className="font-mono text-xs sm:text-sm tracking-wide text-accent/90 bg-[#0b1020]/60 border border-accent/20 rounded-md px-4 py-3 shadow-[0_0_12px_rgba(110,203,255,0.12)]">
+                  // come back soon for sightings and flybys
+                </div>
+              </AccordionItem>
+            );
+          })}
+        </Accordion>
+        <div className="mt-3 text-[10px] text-foreground/60">Orbital data source: NASA/JPL SBDB</div>
       </CardContent>
     </Card>
   );
