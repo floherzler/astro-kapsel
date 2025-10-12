@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, type CSSProperties } from "react";
+import React, { useEffect, useState, useMemo, type CSSProperties } from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Query, Functions } from "appwrite";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -146,9 +146,12 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
         // Subscribe to realtime changes on this table
         unsub = client.subscribe(
           `databases.${databaseId}.tables.${tableId}.rows`,
-          async () => {
-            // Re-fetch to respect active filters
-            await fetchRows();
+          async (event: { events?: string[] }) => {
+            const evs = event?.events ?? [];
+            const mutate = evs.some((e) => /\.(create|update|delete)$/.test(e));
+            if (mutate) {
+              await fetchRows();
+            }
           }
         );
       } catch (e) {
@@ -172,7 +175,7 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
           return a.localeCompare(b);
         });
         setOrbitClasses(uniq);
-      } catch (e) {
+      } catch {
         // ignore
       }
     })();
@@ -183,11 +186,11 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
     };
   }, [databaseId, tableId, tables]);
 
-  // Reapply filters instantly on change
+  // Reapply filters/sorting on change
   useEffect(() => {
     fetchRows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClasses, selectedBuckets]);
+  }, [selectedClasses, selectedBuckets, sortKey, sortDir]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -347,8 +350,8 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
         className: dtDays <= 15
           ? "bg-gradient-to-br from-rose-500/35 via-orange-400/25 to-amber-300/10 text-white border-transparent"
           : dtDays <= 45
-          ? "bg-gradient-to-r from-orange-400/30 to-amber-300/15 text-white border-transparent"
-          : "bg-[#1a2238]/40 text-foreground/80 border border-[#344056]/40",
+            ? "bg-gradient-to-r from-orange-400/30 to-amber-300/15 text-white border-transparent"
+            : "bg-[#1a2238]/40 text-foreground/80 border border-[#344056]/40",
         rowStyle: {
           boxShadow: `0 0 ${rad}px rgba(${r},${g},${b},${alpha})`,
           borderColor: `rgba(${r},${g},${b},${Math.min(0.45, 0.2 + 0.25 * t)})`,
@@ -414,8 +417,8 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
             <button
               type="button"
               className={`px-3 py-1.5 rounded text-sm transition-colors border ${selectedClasses.length === 0
-                  ? "bg-accent text-black border-accent/60 shadow-[0_0_12px_rgba(255,255,255,0.25)]"
-                  : "text-foreground/80 hover:bg-white/10 border-white/15"
+                ? "bg-accent text-black border-accent/60 shadow-[0_0_12px_rgba(255,255,255,0.25)]"
+                : "text-foreground/80 hover:bg-white/10 border-white/15"
                 }`}
               onClick={() => setSelectedClasses([])}
               title="Show all orbit classes"
@@ -458,8 +461,8 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
             <button
               type="button"
               className={`px-3 py-1.5 rounded text-sm transition-colors border ${selectedBuckets.length === 0
-                  ? "bg-accent text-black border-accent/60 shadow-[0_0_12px_rgba(255,255,255,0.25)]"
-                  : "text-foreground/80 hover:bg-white/10 border-white/15"
+                ? "bg-accent text-black border-accent/60 shadow-[0_0_12px_rgba(255,255,255,0.25)]"
+                : "text-foreground/80 hover:bg-white/10 border-white/15"
                 }`}
               onClick={() => setSelectedBuckets([])}
               title="Show all durations"
@@ -512,7 +515,7 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
           <span>Sort:</span>
           <Dropdown
             value={sortKey}
-            onChange={(v) => setSortKey((v as any) || "countdown")}
+            onChange={(v) => setSortKey((v as "id" | "family" | "period" | "last" | "next" | "countdown") || "countdown")}
             items={[
               { value: "countdown", label: "Countdown" },
               { value: "id", label: "ID" },
@@ -573,9 +576,9 @@ export default function CometList({ onVisibleChange }: { onVisibleChange?: (ids:
               </div>
             );
             return (
-              <AccordionItem key={c.$id} header={header}>
+              <AccordionItem key={c.$id} header={header(false)}>
                 <div className="font-mono text-xs sm:text-sm tracking-wide text-accent/90 bg-[#0b1020]/60 border border-accent/20 rounded-md px-4 py-3 shadow-[0_0_12px_rgba(110,203,255,0.12)]">
-                  // come back soon for sightings and flybys
+                  {">"} come back soon for sightings and flybys
                 </div>
               </AccordionItem>
             );
