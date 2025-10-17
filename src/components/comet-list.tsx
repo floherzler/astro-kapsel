@@ -64,55 +64,55 @@ export default function CometList({
   const tables = useMemo(() => new TablesDB(client), []);
   const functions = useMemo(() => new Functions(client), []);
 
-  const ORBIT_INFO: Record<string, { short: string; url?: string }> = {
-    jfc: {
-      short:
-        "Jupiter-family comets (P < 20y; 2 < T_J < 3) are controlled by Jupiter and likely originate in the Kuiper Belt/Scattered Disk.",
-      url: "https://en.wikipedia.org/wiki/Jupiter-family_comet",
-    },
-    encke: {
-      short:
-        "Encke-type are JFCs with aphelion Q < 4 AU (e.g., 2P/Encke), effectively decoupled from strong Jupiter encounters.",
-      url: "https://en.wikipedia.org/wiki/2P/Encke",
-    },
-    halley: {
-      short:
-        "Halley-type comets (20–200y) have higher inclinations (often retrograde) and are thought to come from the Oort Cloud.",
-      url: "https://en.wikipedia.org/wiki/Halley-type_comet",
-    },
-    lpc: {
-      short:
-        "Long-period comets (P > 200y) are near-parabolic and isotropically distributed, consistent with an Oort Cloud origin.",
-      url: "https://en.wikipedia.org/wiki/Long-period_comet",
-    },
-    spc: {
-      short: "Short-period comets (P < 200y) include Jupiter-family and Halley-type comets.",
-      url: "https://en.wikipedia.org/wiki/Short-period_comet",
-    },
-    hyperbolic: {
-      short: "Hyperbolic comets (e ≥ 1) are on unbound trajectories and may be interstellar.",
-      url: "https://en.wikipedia.org/wiki/Interstellar_comet",
-    },
-    nearparabolic: {
-      short: "Near-parabolic comets have eccentricities very close to 1 and extremely long periods.",
-    },
-    nonperiodic: {
-      short: "Non-periodic comets are observed once; they typically have P » 200 years or unbound orbits.",
-    },
-  };
+  // const ORBIT_INFO: Record<string, { short: string; url?: string }> = {
+  //   jfc: {
+  //     short:
+  //       "Jupiter-family comets (P < 20y; 2 < T_J < 3) are controlled by Jupiter and likely originate in the Kuiper Belt/Scattered Disk.",
+  //     url: "https://en.wikipedia.org/wiki/Jupiter-family_comet",
+  //   },
+  //   encke: {
+  //     short:
+  //       "Encke-type are JFCs with aphelion Q < 4 AU (e.g., 2P/Encke), effectively decoupled from strong Jupiter encounters.",
+  //     url: "https://en.wikipedia.org/wiki/2P/Encke",
+  //   },
+  //   halley: {
+  //     short:
+  //       "Halley-type comets (20–200y) have higher inclinations (often retrograde) and are thought to come from the Oort Cloud.",
+  //     url: "https://en.wikipedia.org/wiki/Halley-type_comet",
+  //   },
+  //   lpc: {
+  //     short:
+  //       "Long-period comets (P > 200y) are near-parabolic and isotropically distributed, consistent with an Oort Cloud origin.",
+  //     url: "https://en.wikipedia.org/wiki/Long-period_comet",
+  //   },
+  //   spc: {
+  //     short: "Short-period comets (P < 200y) include Jupiter-family and Halley-type comets.",
+  //     url: "https://en.wikipedia.org/wiki/Short-period_comet",
+  //   },
+  //   hyperbolic: {
+  //     short: "Hyperbolic comets (e ≥ 1) are on unbound trajectories and may be interstellar.",
+  //     url: "https://en.wikipedia.org/wiki/Interstellar_comet",
+  //   },
+  //   nearparabolic: {
+  //     short: "Near-parabolic comets have eccentricities very close to 1 and extremely long periods.",
+  //   },
+  //   nonperiodic: {
+  //     short: "Non-periodic comets are observed once; they typically have P » 200 years or unbound orbits.",
+  //   },
+  // };
 
-  function normalizeClassName(name: string): string {
-    const s = name.toLowerCase();
-    if (s.includes("jupiter") && s.includes("family")) return "jfc";
-    if (s.includes("encke")) return "encke";
-    if (s.includes("halley")) return "halley";
-    if (s.includes("long") && s.includes("period")) return "lpc";
-    if (s.includes("short") && s.includes("period")) return "spc";
-    if (s.includes("hyperbolic")) return "hyperbolic";
-    if (s.includes("near") && s.includes("parabolic")) return "nearparabolic";
-    if (s.includes("non") && s.includes("period")) return "nonperiodic";
-    return s.trim();
-  }
+  // function normalizeClassName(name: string): string {
+  //   const s = name.toLowerCase();
+  //   if (s.includes("jupiter") && s.includes("family")) return "jfc";
+  //   if (s.includes("encke")) return "encke";
+  //   if (s.includes("halley")) return "halley";
+  //   if (s.includes("long") && s.includes("period")) return "lpc";
+  //   if (s.includes("short") && s.includes("period")) return "spc";
+  //   if (s.includes("hyperbolic")) return "hyperbolic";
+  //   if (s.includes("near") && s.includes("parabolic")) return "nearparabolic";
+  //   if (s.includes("non") && s.includes("period")) return "nonperiodic";
+  //   return s.trim();
+  // }
 
   async function fetchRows() {
     try {
@@ -216,9 +216,36 @@ export default function CometList({
       if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
 
       const exec = await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) });
-      const ok = exec.status === "completed";
-      setSubmitMsg(ok ? "☄️ Comet request queued" : `Execution status: ${exec.status}`);
-      if (ok) {
+      if (exec.status !== "completed") {
+        setSubmitMsg(`Execution status: ${exec.status}`);
+        setSubmitValue("");
+        return;
+      }
+
+      const statusCodeRaw = exec.responseStatusCode;
+      const statusCode =
+        typeof statusCodeRaw === "number" ? statusCodeRaw : Number(statusCodeRaw ?? 0);
+      const rawResponse = exec.response ?? "";
+      let parsed: any = null;
+      if (rawResponse) {
+        try {
+          parsed = JSON.parse(rawResponse);
+        } catch {
+          parsed = null;
+        }
+      }
+      const responseMessage =
+        (parsed && (parsed.error || parsed.message)) || (rawResponse && !parsed ? rawResponse : null);
+
+      if (Number.isFinite(statusCode) && statusCode >= 400) {
+        setSubmitError(typeof responseMessage === "string" ? responseMessage : `Execution failed with status ${statusCode}`);
+        setSubmitMsg(null);
+      } else {
+        const successMsg =
+          (parsed && typeof parsed.message === "string" && parsed.message.length > 0)
+            ? parsed.message
+            : "☄️ Comet request queued";
+        setSubmitMsg(successMsg);
         setBlast(true);
         setTimeout(() => setBlast(false), 1200);
       }
@@ -495,11 +522,10 @@ export default function CometList({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${
-                  selectedClasses.length === 0
-                    ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
-                    : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
-                }`}
+                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${selectedClasses.length === 0
+                  ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
+                  : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
+                  }`}
                 onClick={() => setSelectedClasses([])}
               >
                 All
@@ -528,11 +554,10 @@ export default function CometList({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${
-                  selectedBuckets.length === 0
-                    ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
-                    : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
-                }`}
+                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${selectedBuckets.length === 0
+                  ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
+                  : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
+                  }`}
                 onClick={() => setSelectedBuckets([])}
               >
                 All

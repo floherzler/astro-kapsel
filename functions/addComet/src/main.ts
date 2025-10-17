@@ -4,6 +4,25 @@ type Body = {
     cometID?: string; // e.g. "1P" or "1P/Halley"
 };
 
+function extractNasaMessage(payload: any): string | null {
+    if (!payload) return null;
+    const { message, error } = payload;
+    if (typeof message === "string") return message;
+    if (message && typeof message === "object") {
+        if (typeof message.message === "string") return message.message;
+        if (typeof message.description === "string") return message.description;
+        if (Array.isArray(message)) {
+            const merged = message.filter((m) => typeof m === "string").join(" ").trim();
+            if (merged) return merged;
+        }
+    }
+    if (typeof error === "string") return error;
+    if (error && typeof error === "object" && typeof error.message === "string") {
+        return error.message;
+    }
+    return null;
+}
+
 function ok(res: any, data: unknown, status = 200) {
     return res.json(data, status);
 }
@@ -59,7 +78,12 @@ export default async ({ req, res, log, error }: any) => {
         }
 
         if (!nasaData?.object?.fullname) {
-            return fail(res, "Invalid or empty response from NASA API", 404);
+            const nasaMessage = extractNasaMessage(nasaData);
+            const reason =
+                nasaMessage && nasaMessage.length > 0
+                    ? nasaMessage
+                    : `Comet ID "${cometID}" not found in NASA SBDB`;
+            return fail(res, reason, 404, { cometID });
         }
 
         // --- Extract summary (correct field mapping) ---
