@@ -16,6 +16,7 @@ type FalImagePayload = {
 };
 
 type FalTextPayload = {
+    output?: string | null;
     output_text?: string | null;
     text?: string | null;
     [key: string]: unknown;
@@ -106,6 +107,9 @@ function normalizePrompt(value: unknown): string | null {
 }
 
 function extractTextOutput(data: FalTextPayload): string | null {
+    if (typeof data.output === "string" && data.output.length > 0) {
+        return data.output;
+    }
     if (typeof data.output_text === "string" && data.output_text.length > 0) {
         return data.output_text;
     }
@@ -285,7 +289,7 @@ export default async function handler({ req, res, error }: HandlerContext) {
         const prompt = buildSummaryPrompt(cometName, fromYear, toYear);
 
         try {
-            const { data, requestId } = await generateText(prompt, "meta/llama-3.1-70b");
+            const { data, requestId } = await generateText(prompt);
             const output = extractTextOutput(data);
             if (!output) {
                 return res.json(
