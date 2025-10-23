@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useMemo, useCallback, type CSSProperties } from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Query, Functions } from "appwrite";
+import type { Models } from "appwrite";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,38 @@ type CometRow = {
 
 type CometListVariant = "default" | "compact";
 type DurationBucket = { key: string; label: string; min?: number; max?: number };
+type ExecutionWithExtras = Models.Execution & {
+  statusCode?: unknown;
+  response?: unknown;
+  stdout?: unknown;
+  result?: unknown;
+};
+
+function coerceFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function getExecutionStatusCode(execution: ExecutionWithExtras): number | undefined {
+  return coerceFiniteNumber(execution.responseStatusCode) ?? coerceFiniteNumber(execution.statusCode);
+}
+
+function getExecutionResponseBody(execution: ExecutionWithExtras): string {
+  const candidates = [execution.responseBody, execution.response, execution.stdout, execution.result];
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    if (typeof candidate === "string" && candidate.length > 0) return candidate;
+  }
+  for (const candidate of candidates) {
+    if (candidate == null) continue;
+    return String(candidate);
+  }
+  return "";
+}
 
 export default function CometList({
   onVisibleChange,
@@ -117,6 +150,52 @@ export default function CometList({
   //   if (s.includes("non") && s.includes("period")) return "nonperiodic";
   //   return s.trim();
   // }
+  const sortRows = useCallback(
+    (rows: CometRow[]): CometRow[] => {
+      const dir = sortDir === "asc" ? 1 : -1;
+      const now = jdNow();
+      const keyVal = (r: CometRow): number | string => {
+        switch (sortKey) {
+          case "id":
+            return (r.designation ?? r.name ?? r.$id).toString().toLowerCase();
+          case "family":
+            return (r.orbit_class ?? "").toLowerCase();
+          case "period":
+            return typeof r.period_years === "number"
+              ? r.period_years
+              : Number(r.period_years ?? Number.POSITIVE_INFINITY);
+          case "last": {
+            const jd = lastPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
+            return jd ?? Number.NEGATIVE_INFINITY;
+          }
+          case "next": {
+            const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
+            return jd ?? Number.POSITIVE_INFINITY;
+          }
+          case "countdown": {
+            const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
+            return jd ? jd - now : Number.POSITIVE_INFINITY;
+          }
+          default:
+            return r.$id;
+        }
+      };
+      return [...rows].sort((a, b) => {
+        const va = keyVal(a);
+        const vb = keyVal(b);
+        if (typeof va === "string" && typeof vb === "string") return va.localeCompare(vb) * dir;
+        const na = Number(va);
+        const nb = Number(vb);
+        if (Number.isNaN(na) && Number.isNaN(nb)) return 0;
+        if (Number.isNaN(na)) return 1;
+        if (Number.isNaN(nb)) return -1;
+        if (na === nb) return 0;
+        return na < nb ? -1 * dir : 1 * dir;
+      });
+    },
+    [sortDir, sortKey]
+  );
+
   const fetchRows = useCallback(async () => {
     try {
       setLoading(true);
@@ -147,7 +226,7 @@ export default function CometList({
     } finally {
       setLoading(false);
     }
-  }, [databaseId, tableId, tables, selectedClasses, selectedBuckets, sortKey, sortDir, onVisibleChange, DURATION_BUCKETS]);
+  }, [databaseId, tableId, tables, selectedClasses, selectedBuckets, sortRows, onVisibleChange, DURATION_BUCKETS]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -218,19 +297,17 @@ export default function CometList({
       if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
 
       const exec = await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) });
-      const execAny = exec as any;
-      if (execAny.status !== "completed") {
-        setSubmitMsg(`Execution status: ${execAny.status}`);
+      if (exec.status !== "completed") {
+        setSubmitMsg(`Execution status: ${exec.status}`);
         setSubmitValue("");
         return;
       }
 
       // Some SDK versions use different property names on the execution result;
-      // cast to any and try common fallbacks to avoid type errors.
-      const statusCodeRaw = execAny.responseStatusCode ?? execAny.statusCode ?? undefined;
-      const statusCode =
-        typeof statusCodeRaw === "number" ? statusCodeRaw : Number(statusCodeRaw ?? 0);
-      const rawResponse = execAny.response ?? execAny.stdout ?? execAny.result ?? "";
+      // use helper functions to normalize fields across SDK versions.
+      const execution = exec as ExecutionWithExtras;
+      const statusCode = getExecutionStatusCode(execution);
+      const rawResponse = getExecutionResponseBody(execution);
       let parsed: Record<string, unknown> | undefined;
       if (rawResponse) {
         try {
@@ -246,7 +323,7 @@ export default function CometList({
       const parsedMessage = typeof parsed?.message === "string" ? (parsed.message as string) : undefined;
       const responseMessage = parsedError ?? parsedMessage ?? (!parsed && rawResponse ? rawResponse : undefined);
 
-      if (Number.isFinite(statusCode) && statusCode >= 400) {
+      if (typeof statusCode === "number" && Number.isFinite(statusCode) && statusCode >= 400) {
         setSubmitError(responseMessage ?? `Execution failed with status ${statusCode}`);
         setSubmitMsg(null);
       } else {
@@ -309,47 +386,6 @@ export default function CometList({
     let lastJD = tpJD + k * Pdays;
     if (lastJD > now) lastJD -= Pdays;
     return lastJD;
-  }
-
-  function sortRows(rows: CometRow[]): CometRow[] {
-    const dir = sortDir === "asc" ? 1 : -1;
-    const now = jdNow();
-    const keyVal = (r: CometRow): number | string => {
-      switch (sortKey) {
-        case "id":
-          return (r.designation ?? r.name ?? r.$id).toString().toLowerCase();
-        case "family":
-          return (r.orbit_class ?? "").toLowerCase();
-        case "period":
-          return typeof r.period_years === "number" ? r.period_years : Number(r.period_years ?? Number.POSITIVE_INFINITY);
-        case "last": {
-          const jd = lastPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
-          return jd ?? Number.NEGATIVE_INFINITY;
-        }
-        case "next": {
-          const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
-          return jd ?? Number.POSITIVE_INFINITY;
-        }
-        case "countdown": {
-          const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
-          return jd ? (jd - now) : Number.POSITIVE_INFINITY;
-        }
-        default:
-          return r.$id;
-      }
-    };
-    return [...rows].sort((a, b) => {
-      const va = keyVal(a);
-      const vb = keyVal(b);
-      if (typeof va === "string" && typeof vb === "string") return va.localeCompare(vb) * dir;
-      const na = Number(va);
-      const nb = Number(vb);
-      if (isNaN(na) && isNaN(nb)) return 0;
-      if (isNaN(na)) return 1;
-      if (isNaN(nb)) return -1;
-      if (na === nb) return 0;
-      return na < nb ? -1 * dir : 1 * dir;
-    });
   }
 
   function formatCountdown(nextJD: number | null): { label: string; className: string; rowStyle?: CSSProperties } {
