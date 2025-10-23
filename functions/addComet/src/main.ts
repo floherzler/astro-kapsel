@@ -65,13 +65,16 @@ export default async ({ req, res, log, error }: any) => {
         const nasaUrl = `https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=${encodeURIComponent(cometID)}`;
         let nasaData: any;
         try {
+            log(`[addComet] Calling NASA SBDB: ${nasaUrl}`);
             const response = await fetch(nasaUrl);
+            log(`[addComet] NASA response status: ${response.status}`);
             if (!response.ok) {
                 return fail(res, `NASA API returned ${response.status}`, response.status, {
                     details: await response.text(),
                 });
             }
             nasaData = await response.json();
+            log("[addComet] Parsed NASA response successfully");
         } catch (err) {
             log(`[addComet] Error contacting NASA API: ${err}`);
             return fail(res, "Failed to fetch NASA SBDB data", 502);
@@ -116,11 +119,15 @@ export default async ({ req, res, log, error }: any) => {
             .setEndpoint(endpoint)
             .setProject(projectId)
             .setKey(apiKey);
+        log("[addComet] Appwrite client configured");
 
         const tablesDB = new TablesDB(client);
         const databaseId = Deno.env.get("APPWRITE_DATABASE_ID") ?? "astroDB";
         const cometsTableId = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
         const flybyTableId = Deno.env.get("APPWRITE_TABLE_FLYBYS") ?? "flybys";
+        log(
+            `[addComet] Using database ${databaseId}, comets table ${cometsTableId}, flybys table ${flybyTableId}`
+        );
 
         // --- Prevent duplicates ---
         try {
@@ -145,12 +152,14 @@ export default async ({ req, res, log, error }: any) => {
         // --- Insert into Appwrite ---
         let newRow;
         try {
+            log("[addComet] Creating comet row in Appwrite");
             newRow = await tablesDB.createRow({
                 databaseId,
                 tableId: cometsTableId,
                 rowId: ID.unique(),
                 data: summary,
             });
+            log(`[addComet] Appwrite comet row created: ${newRow.$id}`);
         } catch (insertErr) {
             log(`[addComet] Failed to insert comet into Appwrite: ${insertErr}`);
             return fail(res, "Database insert failed", 500);
@@ -183,6 +192,7 @@ export default async ({ req, res, log, error }: any) => {
 
                 // Insert flybys sequentially
                 for (const f of flybys) {
+                    log(`[addComet] Creating flyby for year ${f.year}`);
                     await tablesDB.createRow({
                         databaseId,
                         tableId: flybyTableId,
