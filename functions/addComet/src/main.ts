@@ -112,10 +112,18 @@ export default async ({ req, res, log, error }: any) => {
         // --- Connect to Appwrite ---
         const endpoint = Deno.env.get("APPWRITE_FUNCTION_API_ENDPOINT") ?? "";
         const projectId = Deno.env.get("APPWRITE_FUNCTION_PROJECT_ID") ?? "";
+        const apiKey =
+            req.headers["x-appwrite-key"] ??
+            Deno.env.get("APPWRITE_API_KEY") ??
+            "";
 
         const client = new Client()
             .setEndpoint(endpoint)
             .setProject(projectId);
+
+        if (apiKey && typeof apiKey === "string") {
+            client.setKey(apiKey);
+        }
         log("[addComet] Appwrite client configured");
 
         const tablesDB = new TablesDB(client);
