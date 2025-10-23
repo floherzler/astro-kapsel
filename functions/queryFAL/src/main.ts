@@ -229,19 +229,16 @@ export default async function handler({ req, res, error }: HandlerContext) {
         const apiKey = process.env.APPWRITE_API_KEY ?? "";
 
         try {
-            throwIfMissing({ endpoint, projectId }, ["endpoint", "projectId"] as const);
+            throwIfMissing({ endpoint, projectId, apiKey }, ["endpoint", "projectId", "apiKey"] as const);
         } catch (missingErr) {
             error(missingErr);
             return res.json(
-                { ok: false, error: "Missing Appwrite configuration for summary generation" },
+                { ok: false, error: "Missing Appwrite credentials for summary generation" },
                 500
             );
         }
 
-        const client = new Client().setEndpoint(endpoint).setProject(projectId);
-        if (apiKey) {
-            client.setKey(apiKey);
-        }
+        const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
         const tablesDB = new TablesDB(client);
         const fetchRow = async (tableId: string, rowId: string, label: string) => {
             try {
