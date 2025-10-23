@@ -319,7 +319,7 @@ export default async function handler({ req, res, error }: HandlerContext) {
                         summary: summaryText,
                         llm_model_used: "fal/meta-llama-3.1-70b",
                         generated_at: new Date().toISOString(),
-                    },
+                    } as Record<string, any>,
                 });
             } catch (createErr) {
                 error(createErr);
