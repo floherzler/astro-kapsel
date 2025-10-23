@@ -1,6 +1,6 @@
 import { fal } from "@fal-ai/client";
 import { Client, ID, TablesDB } from "node-appwrite";
-import { getStaticFile, throwIfMissing } from "./utils.js";
+import { throwIfMissing } from "./utils.js";
 
 type ModelType = "text" | "image" | "summary";
 
@@ -69,6 +69,7 @@ type HandlerSuccessResponse =
           cometId: string;
           fromFlybyId: string;
           toFlybyId: string;
+          model?: string;
       };
 
 type FalResult<TPayload> = {
@@ -122,6 +123,35 @@ function extractTextOutput(data: FalTextPayload): string | null {
         return data.text;
     }
     return null;
+}
+
+function parseSummaryOutput(raw: string): { title?: string; summary?: string } {
+    if (!raw) return {};
+    let content = raw.trim();
+
+    if (content.startsWith("```")) {
+        const fencedMatch = content.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+        if (fencedMatch && fencedMatch[1]) {
+            content = fencedMatch[1].trim();
+        } else {
+            content = content.replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
+        }
+    }
+
+    try {
+        const parsed = JSON.parse(content);
+        const title =
+            typeof parsed?.title === "string" && parsed.title.trim().length > 0
+                ? parsed.title.trim()
+                : undefined;
+        const summary =
+            typeof parsed?.summary === "string" && parsed.summary.trim().length > 0
+                ? parsed.summary.trim()
+                : undefined;
+        return { title, summary };
+    } catch {
+        return {};
+    }
 }
 
 function normalizeSummaryInput(body: unknown): SummaryInput | null {
@@ -205,9 +235,13 @@ export default async ({ req, res, log, error }: HandlerContext) => {
     throwIfMissing(process.env, ["FAL_API_KEY"] as const);
 
     if (req.method === "GET") {
-        return res.text(getStaticFile("index.html"), 200, {
-            "Content-Type": "text/html; charset=utf-8",
-        });
+        return res.json(
+            {
+                ok: true,
+                message: "queryFAL function ready",
+            },
+            200
+        );
     }
 
     let body: Record<string, unknown> = {};
@@ -328,7 +362,8 @@ export default async ({ req, res, log, error }: HandlerContext) => {
         const prompt = buildSummaryPrompt(cometName, fromYear, toYear);
 
         try {
-            const { data, requestId } = await generateText(prompt);
+            const modelUsed = DEFAULT_TEXT_MODEL;
+            const { data, requestId } = await generateText(prompt, modelUsed);
             const output = extractTextOutput(data);
             if (!output) {
                 return res.json(
@@ -337,19 +372,9 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                 );
             }
 
-            let title = "Comet Era Summary";
-            let summaryText = output;
-            try {
-                const parsed = JSON.parse(output);
-                if (typeof parsed.title === "string" && parsed.title.trim().length > 0) {
-                    title = parsed.title.trim();
-                }
-                if (typeof parsed.summary === "string" && parsed.summary.trim().length > 0) {
-                    summaryText = parsed.summary.trim();
-                }
-            } catch {
-                // keep fallback values
-            }
+            const parsedFields = parseSummaryOutput(output);
+            const title = parsedFields.title ?? "Comet Era Summary";
+            const summaryText = parsedFields.summary ?? output;
 
             let summaryRow: Record<string, any>;
             try {
@@ -358,12 +383,12 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                     tableId: TABLE_SUMMARIES,
                     rowId: ID.unique(),
                     data: {
-                        comet: [cometRow.$id],
+                        comet: cometRow.$id,
                         from_flyby: fromFlybyRow.$id,
                         to_flyby: toFlybyRow.$id,
                         title,
                         summary: summaryText,
-                        llm_model_used: "fal/meta-llama-3.1-70b",
+                        llm_model_used: modelUsed,
                         generated_at: new Date().toISOString(),
                     } as Record<string, any>,
                 });
@@ -382,9 +407,10 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                 cometId: cometRow.$id,
                 fromFlybyId: fromFlybyRow.$id,
                 toFlybyId: toFlybyRow.$id,
+                model: modelUsed,
             };
 
-            return res.json(response, 201);
+            return res.json(response, 200);
         } catch (falErr) {
             error(falErr);
             return res.json({ ok: false, error: "Failed to generate summary" }, 502);
