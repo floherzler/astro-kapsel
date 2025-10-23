@@ -2,16 +2,20 @@
     "name": "generate-with-fal",
     "version": "1.0.0",
     "description": "",
-    "main": "src/main.js",
+    "main": "dist/main.js",
     "type": "module",
     "scripts": {
-        "format": "prettier --write ."
+        "build": "tsc -p tsconfig.build.json",
+        "format": "prettier --write .",
+        "check": "tsc --noEmit"
     },
     "keywords": [],
     "dependencies": {
-        "@fal-ai/serverless-client": "^0.10.0"
+        "@fal-ai/client": "^1.7.0"
     },
     "devDependencies": {
-        "prettier": "^3.2.5"
+        "@types/node": "^22.10.1",
+        "prettier": "^3.2.5",
+        "typescript": "^5.6.3"
     }
 }
