@@ -225,8 +225,16 @@ export default async function handler({ req, res, error }: HandlerContext) {
             process.env.APPWRITE_ENDPOINT ??
             "";
         const projectId =
-            process.env.APPWRITE_FUNCTION_PROJECT_ID ?? process.env.APPWRITE_PROJECT_ID ?? "";
-        const apiKey = process.env.APPWRITE_API_KEY ?? "";
+            process.env.APPWRITE_FUNCTION_PROJECT_ID ??
+            process.env.APPWRITE_PROJECT_ID ??
+            (typeof req.headers?.["x-appwrite-project"] === "string"
+                ? req.headers["x-appwrite-project"]
+                : "");
+        const apiKeyHeader =
+            typeof req.headers?.["x-appwrite-key"] === "string"
+                ? (req.headers["x-appwrite-key"] as string)
+                : "";
+        const apiKey = apiKeyHeader || process.env.APPWRITE_API_KEY || "";
 
         try {
             throwIfMissing({ endpoint, projectId, apiKey }, ["endpoint", "projectId", "apiKey"] as const);
@@ -238,7 +246,10 @@ export default async function handler({ req, res, error }: HandlerContext) {
             );
         }
 
-        const client = new Client().setEndpoint(endpoint).setProject(projectId).setKey(apiKey);
+        const client = new Client()
+            .setEndpoint(endpoint)
+            .setProject(projectId)
+            .setKey(apiKey);
         const tablesDB = new TablesDB(client);
         const fetchRow = async (tableId: string, rowId: string, label: string) => {
             try {
