@@ -384,8 +384,8 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                     rowId: ID.unique(),
                     data: {
                         comet: cometRow.$id,
-                        from_flyby: fromFlybyRow.$id,
-                        to_flyby: toFlybyRow.$id,
+                        from_flyby: [fromFlybyRow.$id],
+                        to_flyby: [toFlybyRow.$id],
                         title,
                         summary: summaryText,
                         llm_model_used: modelUsed,
