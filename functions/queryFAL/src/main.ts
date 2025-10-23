@@ -24,10 +24,14 @@ type FalTextPayload = {
 
 interface HandlerRequest {
     method: string;
+    headers: Record<string, string | undefined>;
+    json: () => Promise<unknown>;
     bodyJson?: {
         prompt?: unknown;
         modelType?: unknown;
     };
+    bodyText?: string;
+    payload?: string;
 }
 
 interface HandlerResponse {
@@ -38,6 +42,7 @@ interface HandlerResponse {
 interface HandlerContext {
     req: HandlerRequest;
     res: HandlerResponse;
+    log: (message: unknown) => void;
     error: (error: unknown) => void;
 }
 
@@ -196,7 +201,7 @@ async function generateText(
     return job as FalResult<FalTextPayload>;
 }
 
-export default async function handler({ req, res, error }: HandlerContext) {
+export default async ({ req, res, log, error }: HandlerContext) => {
     throwIfMissing(process.env, ["FAL_API_KEY"] as const);
 
     if (req.method === "GET") {
@@ -205,7 +210,33 @@ export default async function handler({ req, res, error }: HandlerContext) {
         });
     }
 
-    const body = req.bodyJson ?? {};
+    let body: Record<string, unknown> = {};
+    try {
+        const parsed = (await req.json()) as Record<string, unknown>;
+        if (parsed && typeof parsed === "object") {
+            body = parsed;
+        }
+    } catch {
+        if (
+            req.bodyJson &&
+            typeof req.bodyJson === "object" &&
+            !Array.isArray(req.bodyJson)
+        ) {
+            body = req.bodyJson as Record<string, unknown>;
+        } else if (typeof req.bodyText === "string" && req.bodyText.length > 0) {
+            try {
+                body = JSON.parse(req.bodyText) as Record<string, unknown>;
+            } catch {
+                log("[queryFAL] bodyText could not be parsed as JSON");
+            }
+        } else if (typeof req.payload === "string" && req.payload.length > 0) {
+            try {
+                body = JSON.parse(req.payload) as Record<string, unknown>;
+            } catch {
+                log("[queryFAL] payload could not be parsed as JSON");
+            }
+        }
+    }
     const modelType = normalizeModelType(body.modelType);
 
     ensureFalClientConfigured(process.env.FAL_API_KEY);
@@ -261,7 +292,7 @@ export default async function handler({ req, res, error }: HandlerContext) {
                 }
                 throw fetchErr;
             }
-        };
+};
 
         let cometRow: Record<string, any>;
         let fromFlybyRow: Record<string, any>;
