@@ -1,5 +1,5 @@
 import { fal } from "@fal-ai/client";
-import { getStaticFile, throwIfMissing } from "./utils.ts";
+import { getStaticFile, throwIfMissing } from "./utils.js";
 
 type ModelType = "text" | "image";
 
