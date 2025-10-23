@@ -182,8 +182,7 @@ export default async ({ req, res, log, error }: any) => {
                 // Generate 5 past + 1 future flyby estimates
                 for (let n = -5; n <= 1; n++) {
                     flybys.push({
-                        // Relationship columns expect an array of document IDs
-                        comet: [newRow.$id],
+                        comet: newRow.$id,
                         year: lastYear + n * period,
                         description: null,
                         flagged: false,
