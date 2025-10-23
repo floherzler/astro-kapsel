@@ -183,7 +183,7 @@ async function generateText(
 ): Promise<FalResult<FalTextPayload>> {
     const job = await fal.subscribe(TEXT_ORCHESTRATOR_ID, {
         input: {
-            model,
+            model: model as any,
             prompt,
         },
         logs: true,

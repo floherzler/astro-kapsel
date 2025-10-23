@@ -12,7 +12,7 @@
     "keywords": [],
     "dependencies": {
         "@fal-ai/client": "^1.7.0",
-        "node-appwrite": "^14.0.0"
+        "node-appwrite": "^20.2.1"
     },
     "devDependencies": {
         "@types/node": "^22.10.1",
