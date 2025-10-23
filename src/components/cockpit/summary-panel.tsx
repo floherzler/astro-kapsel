@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Functions, Query } from "appwrite";
+import type { Models } from "appwrite";
 import { CockpitPanel, CockpitPanelHeader } from "@/components/cockpit/panel";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Button } from "@/components/ui/button";
@@ -113,6 +114,16 @@ function buildWindows(flybys: FlybyRow[]): FlybyWindow[] {
   return windows;
 }
 
+function getExecutionOutput(execution: Models.Execution): string | null {
+  const execWithOutput = execution as Models.Execution & {
+    response?: unknown;
+    stdout?: unknown;
+  };
+  const rawOutput = execWithOutput.response ?? execWithOutput.stdout;
+  if (rawOutput == null) return null;
+  return typeof rawOutput === "string" ? rawOutput : String(rawOutput);
+}
+
 export default function SummaryPanel() {
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableComets =
@@ -201,7 +212,10 @@ export default function SummaryPanel() {
 
         const flybyRows = flybyRes.rows as FlybyRow[];
         const filteredFlybys = sortFlybys(
-          flybyRows.filter((row) => getRelationId((row as any).comet) === cometId || (row as any).comet === cometId)
+          flybyRows.filter((row) => {
+            const relationId = getRelationId(row.comet);
+            return relationId === cometId || (typeof row.comet === "string" && row.comet === cometId);
+          })
         );
         const windows = buildWindows(filteredFlybys);
         setFlybyWindows(windows);
@@ -361,8 +375,7 @@ export default function SummaryPanel() {
           }),
         });
 
-        // Some SDK versions don't type `response` on Execution; try common fields and fall back to any.
-        const execResponse = (exec as any).response ?? (exec as any).stdout ?? null;
+        const execResponse = getExecutionOutput(exec);
 
         if (exec.status !== "completed") {
           setStatusMessage(`Execution status: ${exec.status}`);
