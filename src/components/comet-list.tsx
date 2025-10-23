@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, type CSSProperties } from "react";
+import React, { useEffect, useState, useMemo, useCallback, type CSSProperties } from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Query, Functions } from "appwrite";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,7 @@ type CometRow = {
 };
 
 type CometListVariant = "default" | "compact";
+type DurationBucket = { key: string; label: string; min?: number; max?: number };
 
 export default function CometList({
   onVisibleChange,
@@ -43,15 +44,18 @@ export default function CometList({
   const [, setNowTick] = useState<number>(Date.now());
   const [orbitClasses, setOrbitClasses] = useState<string[]>([]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
-  const DURATION_BUCKETS: { key: string; label: string; min?: number; max?: number }[] = [
-    { key: "lt10", label: "< 10y", max: 10 },
-    { key: "10to25", label: "10–25y", min: 10, max: 25 },
-    { key: "25to50", label: "25–50y", min: 25, max: 50 },
-    { key: "50to100", label: "50–100y", min: 50, max: 100 },
-    { key: "100to200", label: "100–200y", min: 100, max: 200 },
-    { key: "200to500", label: "200–500y", min: 200, max: 500 },
-    { key: "gt500", label: "> 500y", min: 500 },
-  ];
+  const DURATION_BUCKETS = useMemo<DurationBucket[]>(
+    () => [
+      { key: "lt10", label: "< 10y", max: 10 },
+      { key: "10to25", label: "10–25y", min: 10, max: 25 },
+      { key: "25to50", label: "25–50y", min: 25, max: 50 },
+      { key: "50to100", label: "50–100y", min: 50, max: 100 },
+      { key: "100to200", label: "100–200y", min: 100, max: 200 },
+      { key: "200to500", label: "200–500y", min: 200, max: 500 },
+      { key: "gt500", label: "> 500y", min: 500 },
+    ],
+    []
+  );
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
   // inline info replaces button
   // filters apply in realtime
@@ -113,8 +117,7 @@ export default function CometList({
   //   if (s.includes("non") && s.includes("period")) return "nonperiodic";
   //   return s.trim();
   // }
-
-  async function fetchRows() {
+  const fetchRows = useCallback(async () => {
     try {
       setLoading(true);
       const queries: string[] = [Query.limit(400)];
@@ -144,7 +147,7 @@ export default function CometList({
     } finally {
       setLoading(false);
     }
-  }
+  }, [databaseId, tableId, tables, selectedClasses, selectedBuckets, sortKey, sortDir, onVisibleChange, DURATION_BUCKETS]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -194,13 +197,12 @@ export default function CometList({
     return () => {
       if (typeof unsub === "function") unsub();
     };
-  }, [databaseId, tableId, tables]);
+  }, [databaseId, tableId, tables, fetchRows]);
 
   // Reapply filters/sorting on change
   useEffect(() => {
     fetchRows();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClasses, selectedBuckets, sortKey, sortDir]);
+  }, [fetchRows]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -216,34 +218,41 @@ export default function CometList({
       if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
 
       const exec = await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) });
-      if (exec.status !== "completed") {
-        setSubmitMsg(`Execution status: ${exec.status}`);
+      const execAny = exec as any;
+      if (execAny.status !== "completed") {
+        setSubmitMsg(`Execution status: ${execAny.status}`);
         setSubmitValue("");
         return;
       }
 
-      const statusCodeRaw = exec.responseStatusCode;
+      // Some SDK versions use different property names on the execution result;
+      // cast to any and try common fallbacks to avoid type errors.
+      const statusCodeRaw = execAny.responseStatusCode ?? execAny.statusCode ?? undefined;
       const statusCode =
         typeof statusCodeRaw === "number" ? statusCodeRaw : Number(statusCodeRaw ?? 0);
-      const rawResponse = exec.response ?? "";
-      let parsed: any = null;
+      const rawResponse = execAny.response ?? execAny.stdout ?? execAny.result ?? "";
+      let parsed: Record<string, unknown> | undefined;
       if (rawResponse) {
         try {
-          parsed = JSON.parse(rawResponse);
+          const candidate = JSON.parse(rawResponse);
+          if (candidate && typeof candidate === "object") {
+            parsed = candidate as Record<string, unknown>;
+          }
         } catch {
-          parsed = null;
+          parsed = undefined;
         }
       }
-      const responseMessage =
-        (parsed && (parsed.error || parsed.message)) || (rawResponse && !parsed ? rawResponse : null);
+      const parsedError = typeof parsed?.error === "string" ? (parsed.error as string) : undefined;
+      const parsedMessage = typeof parsed?.message === "string" ? (parsed.message as string) : undefined;
+      const responseMessage = parsedError ?? parsedMessage ?? (!parsed && rawResponse ? rawResponse : undefined);
 
       if (Number.isFinite(statusCode) && statusCode >= 400) {
-        setSubmitError(typeof responseMessage === "string" ? responseMessage : `Execution failed with status ${statusCode}`);
+        setSubmitError(responseMessage ?? `Execution failed with status ${statusCode}`);
         setSubmitMsg(null);
       } else {
         const successMsg =
-          (parsed && typeof parsed.message === "string" && parsed.message.length > 0)
-            ? parsed.message
+          parsedMessage && parsedMessage.length > 0
+            ? parsedMessage
             : "☄️ Comet request queued";
         setSubmitMsg(successMsg);
         setBlast(true);
