@@ -383,7 +383,7 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                     tableId: TABLE_SUMMARIES,
                     rowId: ID.unique(),
                     data: {
-                        comet: [cometRow.$id],
+                        comet: cometRow.$id,
                         from_flyby: fromFlybyRow.$id,
                         to_flyby: toFlybyRow.$id,
                         title,
