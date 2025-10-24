@@ -291,9 +291,7 @@ export default function CometList({
     setSubmitMsg(null);
     setSubmitError(null);
     try {
-      const functionId =
-        (process.env.APPWRITE_ADD_COMET as string | undefined) ||
-        (process.env.NEXT_PUBLIC_APPWRITE_ADD_COMET as string | undefined);
+      const functionId = "addComet";
       if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
 
       const exec = await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) });
