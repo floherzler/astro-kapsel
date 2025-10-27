@@ -1,5 +1,7 @@
 import { fal } from "@fal-ai/client";
-import { Client, ID, TablesDB, Storage, InputFile } from "node-appwrite";
+import { Client, ID, TablesDB, Storage } from "node-appwrite";
+import { InputFile } from "node-appwrite/input-file";
+
 import { throwIfMissing } from "./utils.js";
 
 type ModelType = "text" | "image" | "summary";
