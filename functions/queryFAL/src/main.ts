@@ -1,5 +1,5 @@
 import { fal } from "@fal-ai/client";
-import { Client, ID, TablesDB, Storage } from "node-appwrite";
+import { Client, ID, TablesDB, Storage, InputFile } from "node-appwrite";
 import { throwIfMissing } from "./utils.js";
 
 type ModelType = "text" | "image" | "summary";
@@ -451,7 +451,7 @@ export default async ({ req, res, log, error }: HandlerContext) => {
 
             let storedImageUrl: string | null = null;
             try {
-                const imagePrompt = buildSummaryImagePrompt(cometName, startYear, endYear, summaryText);
+                const imagePrompt = buildSummaryImagePrompt(cometName, fromYear, toYear, summaryText);
                 const { data: imageData } = await generateImage(imagePrompt);
                 const generatedUrl = imageData.images?.[0]?.url;
                 if (typeof generatedUrl === "string" && generatedUrl.length > 0) {
