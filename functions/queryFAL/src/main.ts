@@ -82,7 +82,7 @@ type FalResult<TPayload> = {
     [key: string]: unknown;
 };
 
-const IMAGE_MODEL_ID = "fal-ai/flux/dev";
+const IMAGE_MODEL_ID = "fal-ai/flux-pro/kontext";
 const TEXT_ORCHESTRATOR_ID = "fal-ai/any-llm";
 const DEFAULT_TEXT_MODEL = "google/gemini-2.5-flash-lite";
 
@@ -178,41 +178,62 @@ function normalizeSummaryInput(body: unknown): SummaryInput | null {
 function buildSummaryPrompt(cometName: string, firstFlyby: number, secondFlyby: number): string {
     const startYear = Math.min(firstFlyby, secondFlyby);
     const endYear = Math.max(firstFlyby, secondFlyby);
+
     return `
-You are a science historian and storyteller. Write an engaging but factual summary of the historical period between two comet flybys.
+You are a scientific historian and chronicler of human civilization. Write a precise, factually accurate overview of key historical developments between two comet flybys.
 
 Context:
-- Comet name: ${cometName}
-- Last flyby year: ${Math.round(startYear)}
-- Next flyby year: ${Math.round(endYear)}
+- Comet: ${cometName}
+- Earlier flyby: ${Math.round(startYear)}
+- Later flyby: ${Math.round(endYear)}
 
 Instructions:
-1. Begin with a short introduction about the comet and its orbital rhythm.
-2. Describe key events, discoveries, or cultural shifts between these years.
-3. Connect humanity’s progress in science or space exploration to the comet’s journey.
-4. Keep the tone informative and inspiring.
-5. Length: about 200–300 words.
+1. Do **not** describe the comet or its movement. Focus entirely on human events, inventions, and societal change.
+2. Present the period as a chronological narrative spanning ${Math.abs(endYear - startYear)} years.
+3. Include:
+   - Major **political** and **cultural** shifts (empires, wars, reforms, revolutions)
+   - Influential **figures** in science, philosophy, art, and exploration
+   - Key **inventions** or **technological milestones**
+   - Important **medical events**, **epidemics**, or **scientific discoveries**
+   - Transformations in **society**, **economy**, or **belief systems**
+4. Use real historical dates where possible (e.g., "In 1492, Columbus reached the Americas").
+5. Maintain a scholarly but engaging tone — clear, factual, and accessible.
+6. Keep it balanced globally — not only Western history unless the timeframe is regionally limited.
+7. Length: 250-350 words.
+8. Write in a cohesive narrative form, not bullet points.
 
-Return a JSON:
+Return a JSON object:
 {
-  "title": "A poetic title for the era",
-  "summary": "Full text of your summary."
+  "title": "A concise, era-representative title",
+  "summary": "The full historical overview text."
 }
 `;
 }
 
-function buildSummaryImagePrompt(cometName: string, startYear: number, endYear: number, summary: string): string {
+
+function buildSummaryImagePrompt(
+    cometName: string,
+    startYear: number,
+    endYear: number,
+    summary: string
+): string {
     const condensedSummary = summary.length > 900 ? `${summary.slice(0, 897)}…` : summary;
+
     return [
-        "Create a cinematic, high-detail illustration for a space mission briefing.",
+        `Create a cinematic, highly detailed science fiction illustration for a historical space mission briefing.`,
         `Comet: ${cometName}`,
-        `Era: ${Math.round(startYear)} to ${Math.round(endYear)}`,
-        "Style: photorealistic space art, dramatic lighting, widescreen frame.",
-        "Focus on humanity observing the comet, futuristic spacecraft interior, starfield backdrop.",
-        "Inspiration text:",
+        `Era: ${Math.round(startYear)}–${Math.round(endYear)}`,
+        `Scene: The viewer looks out from the observation deck of a futuristic spacecraft orbiting Earth or near a distant planet.`,
+        `Show scientists, explorers, or historians observing the comet through large viewing windows, holographic displays showing orbital data, and atmospheric lighting.`,
+        `Include visible technological panels, reflections, and ambient lighting that conveys scale and awe.`,
+        `The mood should feel both human and historical — symbolizing reflection on humanity’s progress between ${Math.round(startYear)} and ${Math.round(endYear)}.`,
+        `Style: ultra-detailed, photorealistic, cinematic lighting, high depth, 32k detail, volumetric light, wide-angle composition.`,
+        `Avoid empty space scenes; focus on storytelling elements, interior detail, and the human presence.`,
+        `Inspiration text (for thematic tone, not literal illustration):`,
         condensedSummary,
     ].join("\n");
 }
+
 
 function getExtensionFromMime(mimeType?: string | null): string {
     if (!mimeType) return "png";
