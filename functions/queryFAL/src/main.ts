@@ -1,5 +1,5 @@
 import { fal } from "@fal-ai/client";
-import { Client, ID, TablesDB } from "node-appwrite";
+import { Client, ID, TablesDB, Storage } from "node-appwrite";
 import { throwIfMissing } from "./utils.js";
 
 type ModelType = "text" | "image" | "summary";
@@ -48,29 +48,30 @@ interface HandlerContext {
 
 type HandlerSuccessResponse =
     | {
-          ok: true;
-          type: "image";
-          requestId: string;
-          src: string | null;
-      }
+        ok: true;
+        type: "image";
+        requestId: string;
+        src: string | null;
+    }
     | {
-          ok: true;
-          type: "text";
-          requestId: string;
-          output: string | null;
-      }
+        ok: true;
+        type: "text";
+        requestId: string;
+        output: string | null;
+    }
     | {
-          ok: true;
-          type: "summary";
-          requestId: string;
-          summaryId: string;
-          title: string;
-          summary: string;
-          cometId: string;
-          fromFlybyId: string;
-          toFlybyId: string;
-          model?: string;
-      };
+        ok: true;
+        type: "summary";
+        requestId: string;
+        summaryId: string;
+        title: string;
+        summary: string;
+        cometId: string;
+        fromFlybyId: string;
+        toFlybyId: string;
+        model?: string;
+        imageUrl?: string | null;
+    };
 
 type FalResult<TPayload> = {
     requestId: string;
@@ -87,6 +88,7 @@ const DATABASE_ID = "astroDB";
 const TABLE_COMETS = "comets";
 const TABLE_FLYBYS = "flybys";
 const TABLE_SUMMARIES = "summaries";
+const SUMMARY_IMAGES_BUCKET_ID = "summaryImages";
 
 let falConfigured = false;
 
@@ -171,14 +173,16 @@ function normalizeSummaryInput(body: unknown): SummaryInput | null {
     return { cometId, fromFlybyId, toFlybyId };
 }
 
-function buildSummaryPrompt(cometName: string, lastFlyby: number, nextFlyby: number): string {
+function buildSummaryPrompt(cometName: string, firstFlyby: number, secondFlyby: number): string {
+    const startYear = Math.min(firstFlyby, secondFlyby);
+    const endYear = Math.max(firstFlyby, secondFlyby);
     return `
 You are a science historian and storyteller. Write an engaging but factual summary of the historical period between two comet flybys.
 
 Context:
 - Comet name: ${cometName}
-- Last flyby year: ${Math.round(lastFlyby)}
-- Next flyby year: ${Math.round(nextFlyby)}
+- Last flyby year: ${Math.round(startYear)}
+- Next flyby year: ${Math.round(endYear)}
 
 Instructions:
 1. Begin with a short introduction about the comet and its orbital rhythm.
@@ -193,6 +197,53 @@ Return a JSON:
   "summary": "Full text of your summary."
 }
 `;
+}
+
+function buildSummaryImagePrompt(cometName: string, startYear: number, endYear: number, summary: string): string {
+    const condensedSummary = summary.length > 900 ? `${summary.slice(0, 897)}…` : summary;
+    return [
+        "Create a cinematic, high-detail illustration for a space mission briefing.",
+        `Comet: ${cometName}`,
+        `Era: ${Math.round(startYear)} to ${Math.round(endYear)}`,
+        "Style: photorealistic space art, dramatic lighting, widescreen frame.",
+        "Focus on humanity observing the comet, futuristic spacecraft interior, starfield backdrop.",
+        "Inspiration text:",
+        condensedSummary,
+    ].join("\n");
+}
+
+function getExtensionFromMime(mimeType?: string | null): string {
+    if (!mimeType) return "png";
+    if (mimeType.includes("png")) return "png";
+    if (mimeType.includes("webp")) return "webp";
+    if (mimeType.includes("gif")) return "gif";
+    return "jpg";
+}
+
+async function uploadSummaryImage(params: {
+    storage: Storage;
+    endpoint: string;
+    projectId: string;
+    summaryId: string;
+    imageUrl: string;
+}) {
+    const { storage, endpoint, projectId, summaryId, imageUrl } = params;
+    const response = await fetch(imageUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to download generated image (status ${response.status})`);
+    }
+    const mimeType = response.headers.get("content-type");
+    const extension = getExtensionFromMime(mimeType);
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    const fileId = ID.unique();
+    await storage.createFile({
+        bucketId: SUMMARY_IMAGES_BUCKET_ID,
+        fileId,
+        file: InputFile.fromBuffer(buffer, `${summaryId}.${extension}`),
+    });
+    const base = endpoint.replace(/\/+$/, "");
+    return `${base}/storage/buckets/${SUMMARY_IMAGES_BUCKET_ID}/files/${fileId}/view?project=${projectId}`;
 }
 
 function getErrorCode(err: unknown): number | undefined {
@@ -316,6 +367,7 @@ export default async ({ req, res, log, error }: HandlerContext) => {
             .setProject(projectId)
             .setKey(apiKey);
         const tablesDB = new TablesDB(client);
+        const storage = new Storage(client);
         const fetchRow = async (tableId: string, rowId: string, label: string) => {
             try {
                 return await tablesDB.getRow({ databaseId: DATABASE_ID, tableId, rowId });
@@ -326,7 +378,7 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                 }
                 throw fetchErr;
             }
-};
+        };
 
         let cometRow: Record<string, any>;
         let fromFlybyRow: Record<string, any>;
@@ -397,6 +449,31 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                 return res.json({ ok: false, error: "Failed to store summary" }, 500);
             }
 
+            let storedImageUrl: string | null = null;
+            try {
+                const imagePrompt = buildSummaryImagePrompt(cometName, startYear, endYear, summaryText);
+                const { data: imageData } = await generateImage(imagePrompt);
+                const generatedUrl = imageData.images?.[0]?.url;
+                if (typeof generatedUrl === "string" && generatedUrl.length > 0) {
+                    storedImageUrl = await uploadSummaryImage({
+                        storage,
+                        endpoint,
+                        projectId,
+                        summaryId: summaryRow.$id,
+                        imageUrl: generatedUrl,
+                    });
+                    const updatedRow = await tablesDB.updateRow({
+                        databaseId: DATABASE_ID,
+                        tableId: TABLE_SUMMARIES,
+                        rowId: summaryRow.$id,
+                        data: { image_url: storedImageUrl } as Record<string, any>,
+                    });
+                    summaryRow = updatedRow ?? summaryRow;
+                }
+            } catch (imageErr) {
+                error(imageErr);
+            }
+
             const response: HandlerSuccessResponse = {
                 ok: true,
                 type: "summary",
@@ -408,6 +485,7 @@ export default async ({ req, res, log, error }: HandlerContext) => {
                 fromFlybyId: fromFlybyRow.$id,
                 toFlybyId: toFlybyRow.$id,
                 model: modelUsed,
+                imageUrl: storedImageUrl,
             };
 
             return res.json(response, 200);
