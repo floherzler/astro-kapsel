@@ -1,6 +1,6 @@
 import { fal } from "@fal-ai/client";
 import { Client, ID, TablesDB, Storage } from "node-appwrite";
-import { InputFile } from "node-appwrite/input-file";
+import { InputFile } from "node-appwrite/file";
 
 import { throwIfMissing } from "./utils.js";
 
