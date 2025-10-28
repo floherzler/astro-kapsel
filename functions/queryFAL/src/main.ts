@@ -246,39 +246,34 @@ export function buildSummaryImagePrompt(
     let style = "";
     let focus = "";
 
-    if (duration > 800) {
-        // Long duration → movie poster / collage
+    if (duration >= 100) {
+        // Multi-century → Movie poster / collage
         style =
-            "movie-poster-style collage, symbolic composition, layered depiction of multiple historical eras, painterly lighting, warm tones, epic sense of time";
+            "epic movie-poster collage, layered eras, distinct historical clothing and architecture, rich composition, strong contrast, dramatic lighting";
         focus =
-            "Show transitions from ancient to modern times — architecture, people, inventions, and art evolving through ages. Use compositional storytelling and subtle celestial motifs linking scenes.";
-        aspect_ratio = "9:16";
-        guidance_scale = 4.0;
-    } else if (duration > 300) {
-        // Medium duration → historical panorama
+            "Show multiple time periods transitioning across the image. If the summary mentions historical figures, depict them clearly and recognizably in accurate period-appropriate clothing and setting. Include key technologies, monuments, or artistic styles that symbolize each century.";
+        aspect_ratio = "9:16"; // good for vertical time-stack or layered storytelling
+        guidance_scale = 4.5;
+
+    } else if (duration >= 10) {
+        // Multi-decade → Panoramic scene
         style =
-            "historical panoramic illustration, cinematic lighting, atmospheric perspective, detailed architecture and human activity";
+            "historical panorama, realistic detail, atmospheric perspective, natural color and light, grounded and observational";
         focus =
-            "Depict the cultural and technological evolution across centuries — cities, clothing, tools, and art gradually changing across the landscape.";
-        aspect_ratio = "21:9";
-        guidance_scale = 3.7;
+            "Depict society as it evolves across decades — architecture, clothing, tools, daily life activities. If named individuals appear in the summary, represent them naturally within the scene, interacting authentically with their environment.";
+        aspect_ratio = "21:9"; // wide timeline sweep
+        guidance_scale = 3.8;
+
     } else {
-        // Short duration → focused realistic scene
+        // Single-decade → Focused cultural snapshot
         style =
-            "cinematic realism, documentary lighting, historically accurate materials, authentic setting";
+            "cinematic realism, documentary lighting, historically accurate materials, believable human emotion and setting";
         focus =
-            "Show a vivid, realistic moment from this era — people, inventions, and environment as they appeared between the given years.";
-        aspect_ratio = "16:9";
-        guidance_scale = 3.3;
+            "Show a grounded moment from everyday life in this era. If historical figures are mentioned, show them in a realistic, respectful, and contextually accurate role — not symbolic, but integrated naturally into the environment.";
+        aspect_ratio = "16:9"; // grounded storytelling frame
+        guidance_scale = 3.4;
     }
 
-    const prompt = [
-        `Create a ${style} artwork illustrating humanity between ${startYear} and ${endYear}.`,
-        `Comet: ${cometName}.`,
-        focus,
-        `The image should visually express key ideas, inventions, and cultural developments from the following summary:`,
-        condensedSummary,
-    ].join("\n");
 
     return {
         prompt,
