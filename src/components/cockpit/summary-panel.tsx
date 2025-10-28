@@ -620,12 +620,8 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     <div
       className={`flex min-h-0 flex-col rounded-2xl border border-slate-800/60 bg-slate-950/80 p-4 text-xs text-slate-200/80 ${className}`}
     >
-      {/* Compact header */}
-      <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.45em] text-cyan-200/80">Summary Uplink</p>
-          <p className="text-[10px] uppercase tracking-[0.35em] text-slate-300/70">Select flyby window</p>
-        </div>
+      {/* Centered comet selector as heading */}
+      <div className="flex items-center justify-center pb-2">
         <Dropdown
           value={selectedCometId}
           onChange={(value) => {
@@ -637,7 +633,7 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
               ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
               : [{ value: "", label: "No comets available" }]
           }
-          className="min-w-[13rem]"
+          className="min-w-[14rem]"
         />
       </div>
 
@@ -647,77 +643,93 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
         </div>
       ) : null}
 
-      {/* Carousel-like selector with arrows (minified) */}
-      <div className="mt-1 flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="space"
-          onClick={() => go(-1)}
-          disabled={flybyWindows.length === 0}
-          aria-label="Previous window"
-        >
-          ←
-        </Button>
-
-        <div className="flex-1">
-          {flybyWindows.length === 0 ? (
-            <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-[11px] text-slate-300/80">
-              {loading ? "Loading…" : "No flybys found for this comet."}
-            </div>
-          ) : (
-            (() => {
-              const window = flybyWindows[currentIndex];
-              const summary = summaryByWindow.get(window.id);
-              const isPending = pendingWindowId === window.id;
-              return (
-                <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedWindowId(window.id);
-                      clearStatus();
-                    }}
-                    className="flex flex-1 flex-col text-left"
-                  >
-                    <span className="text-[11px] uppercase tracking-[0.3em] text-cyan-100">
-                      {formatYear(window.from.year)} → {formatYear(window.to.year)}
-                    </span>
-                    <span className={`text-[10px] ${summary ? "text-emerald-300/80" : "text-cyan-200/60"}`}>
-                      {summary ? "Summary available" : "Summary missing"}
-                    </span>
-                  </button>
-                  {!summary ? (
-                    <Button
-                      size="sm"
-                      variant="space"
-                      onClick={() => handleGenerate(window)}
-                      disabled={Boolean(pendingWindowId) && pendingWindowId !== window.id}
-                    >
-                      {isPending ? (
-                        <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em]">
-                          <Spinner />
-                          Generating
-                        </span>
-                      ) : (
-                        "Generate"
-                      )}
-                    </Button>
-                  ) : null}
+      {/* Square flyby card with arrows */}
+      <div className="relative mt-1 flex-1 min-h-0">
+        <div className="absolute inset-0 grid grid-cols-[auto_1fr_auto] items-center gap-2">
+          <div className="flex items-center justify-center">
+            <Button size="sm" variant="space" onClick={() => go(-1)} disabled={flybyWindows.length === 0} aria-label="Previous window">
+              ←
+            </Button>
+          </div>
+          <div className="relative h-full w-full">
+            <div className="absolute inset-0 rounded-xl border border-cyan-400/10 bg-gradient-to-b from-slate-900/60 to-slate-900/30 p-4 shadow-[inset_0_0_25px_rgba(59,130,246,0.08)]">
+              {flybyWindows.length === 0 ? (
+                <div className="grid h-full place-items-center text-[11px] text-slate-300/80">
+                  {loading ? "Loading…" : "No flybys found for this comet."}
                 </div>
-              );
-            })()
-          )}
-        </div>
+              ) : (
+                (() => {
+                  const window = flybyWindows[currentIndex];
+                  const summary = summaryByWindow.get(window.id);
+                  const isPending = pendingWindowId === window.id;
+                  const isSelected = selectedWindowId === window.id;
+                  const idx = currentIndex + 1;
+                  const total = flybyWindows.length;
+                  const fromY = getYearValue(window.from);
+                  const toY = getYearValue(window.to);
+                  const delta = Math.abs(toY - fromY);
+                  const aspect = delta < 10 ? "16:9" : delta <= 100 ? "21:9" : "9:16";
+                  return (
+                    <div className="flex h-full flex-col">
+                      {/* top meta */}
+                      <div className="mb-1 flex flex-col items-center text-[10px] uppercase tracking-[0.35em] text-cyan-200/70">
+                        <span>Window {idx} / {total}</span>
+                        <span className="mt-1">Δ {delta.toFixed(1)}y · {aspect}</span>
+                      </div>
 
-        <Button
-          size="sm"
-          variant="space"
-          onClick={() => go(1)}
-          disabled={flybyWindows.length === 0}
-          aria-label="Next window"
-        >
-          →
-        </Button>
+                      {/* years */}
+                      <div className="mt-2 flex flex-1 items-center justify-center">
+                        <div className="text-center">
+                          <div className="text-base font-medium tracking-[0.5em] text-cyan-100">
+                            {formatYear(window.from.year)}
+                            <span className="px-2 text-cyan-300/80">→</span>
+                            {formatYear(window.to.year)}
+                          </div>
+                          <div
+                            className={`mt-1 text-[11px] ${summary ? "text-emerald-300/80" : "text-red-200/70 animate-pulse"}`}
+                            style={!summary ? { animationDuration: "2.4s" } : undefined}
+                          >
+                            {summary ? "Summary available" : "Summary missing"}
+                          </div>
+                          {/* {isSelected ? (
+                            <div className="mt-2 inline-flex items-center rounded-md border border-cyan-400/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-cyan-100">
+                              Selected window
+                            </div>
+                          ) : null} */}
+                        </div>
+                      </div>
+
+                      {/* actions */}
+                      <div className="mb-1 flex items-center justify-center">
+                        {!summary ? (
+                          <Button
+                            size="sm"
+                            variant="space"
+                            onClick={() => handleGenerate(window)}
+                            disabled={Boolean(pendingWindowId) && pendingWindowId !== window.id}
+                            className="animate-pulse"
+                            style={{ animationDuration: "2.4s" }}
+                          >
+                            {isPending ? (
+                              <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em]"><Spinner /> Generating</span>
+                            ) : (
+                              "Generate"
+                            )}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+          </div>
+          <div className="flex items-center justify-center">
+            <Button size="sm" variant="space" onClick={() => go(1)} disabled={flybyWindows.length === 0} aria-label="Next window">
+              →
+            </Button>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import SummaryProvider, {
   SummaryDetailsPanel,
@@ -60,7 +60,7 @@ function MainView({ children }: { children?: ReactNode }) {
         </div>
       </div>
 
-      {/* Desktop: simple 3 columns x 2 rows grid using available space.
+  {/* Desktop: simple 3 columns x 2 rows grid using available space.
           Wide image order:
             s | f | e
             s | i | i
@@ -69,7 +69,10 @@ function MainView({ children }: { children?: ReactNode }) {
             s | e | i
       */}
       <div className="hidden lg:flex lg:flex-1 lg:items-stretch">
-        <div className="mx-auto grid h-full min-h-0 w-full max-w-[140rem] grid-cols-3 grid-rows-2 gap-6">
+        {/* Sizer keeps 3:2 area inside available space so cells are square */}
+        <GridSizer>
+        {({ style }) => (
+          <div className="mx-auto grid h-full w-full grid-cols-3 grid-rows-2 gap-6" style={style}>
           {/* Summary spans two rows, first column */}
           <SummaryDetailsPanel className="min-h-0 overflow-auto rounded-2xl border border-slate-900/70 bg-[#06080e] lg:col-start-1 lg:row-span-2" />
 
@@ -109,7 +112,41 @@ function MainView({ children }: { children?: ReactNode }) {
               <SummaryVisualizationPanel className="rounded-2xl border border-slate-900/70 bg-[#06080e] lg:col-start-2 lg:col-span-2 lg:row-start-2" />
             </>
           )}
-        </div>
+          </div>
+        )}
+        </GridSizer>
+      </div>
+    </div>
+  );
+}
+
+function GridSizer({ children }: { children: (args: { style: React.CSSProperties }) => React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (cr) setSize({ w: cr.width, h: cr.height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const style = useMemo(() => {
+    const W = size.w || 0;
+    const H = size.h || 0;
+    if (!W || !H) return { width: "100%", height: "100%" } as React.CSSProperties;
+    // Fit 3:2 area inside the available box (no scroll), so each cell is square
+    const maxWidthByHeight = H * 1.5;
+    const width = Math.min(W, maxWidthByHeight);
+    const height = Math.min(H, (width * 2) / 3);
+    return { width, height } as React.CSSProperties;
+  }, [size.w, size.h]);
+  return (
+    <div ref={ref} className="relative h-full w-full">
+      <div className="absolute inset-0 mx-auto flex items-center justify-center">
+        {children({ style })}
       </div>
     </div>
   );
