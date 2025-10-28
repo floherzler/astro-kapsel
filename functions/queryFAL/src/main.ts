@@ -211,25 +211,71 @@ Return a JSON object:
 }
 
 
-function buildSummaryImagePrompt(
+interface ImagePromptConfig {
+    prompt: string;
+    aspect_ratio: "21:9" | "16:9" | "4:3" | "3:2" | "1:1" | "2:3" | "3:4" | "9:16" | "9:21";
+    guidance_scale: number;
+    enhance_prompt: boolean;
+}
+
+export function buildSummaryImagePrompt(
     cometName: string,
     startYear: number,
     endYear: number,
     summary: string
-): string {
-    const condensedSummary = summary.length > 900 ? `${summary.slice(0, 897)}…` : summary;
+): ImagePromptConfig {
+    const condensedSummary =
+        summary.length > 900 ? `${summary.slice(0, 897)}…` : summary;
+    const duration = Math.abs(endYear - startYear);
 
-    return [
-        `Depict a richly detailed historical scene inspired by humanity’s progress between ${Math.round(startYear)} and ${Math.round(endYear)}.`,
-        `The image should visually reflect the key events, cultures, and inventions described below.`,
-        `Each element must appear historically grounded — accurate architecture, clothing, and environment for its period.`,
-        `Avoid futuristic, sci-fi, or abstract compositions.`,
-        `Art style: cinematic realism, painterly lighting, natural color grading, detailed atmosphere.`,
-        `Composition: focus on storytelling, showing people, tools, structures, and environments relevant to the summary.`,
-        `Comet reference (${cometName}) can be subtle, as a symbolic element in the sky if appropriate.`,
-        `Summary context:`,
+    let aspect_ratio: ImagePromptConfig["aspect_ratio"] = "1:1";
+    let guidance_scale = 3.5;
+    let enhance_prompt = true;
+
+    // Base style setup
+    let style = "";
+    let focus = "";
+
+    if (duration > 800) {
+        // Long duration → movie poster / collage
+        style =
+            "movie-poster-style collage, symbolic composition, layered depiction of multiple historical eras, painterly lighting, warm tones, epic sense of time";
+        focus =
+            "Show transitions from ancient to modern times — architecture, people, inventions, and art evolving through ages. Use compositional storytelling and subtle celestial motifs linking scenes.";
+        aspect_ratio = "9:16";
+        guidance_scale = 4.0;
+    } else if (duration > 300) {
+        // Medium duration → historical panorama
+        style =
+            "historical panoramic illustration, cinematic lighting, atmospheric perspective, detailed architecture and human activity";
+        focus =
+            "Depict the cultural and technological evolution across centuries — cities, clothing, tools, and art gradually changing across the landscape.";
+        aspect_ratio = "21:9";
+        guidance_scale = 3.7;
+    } else {
+        // Short duration → focused realistic scene
+        style =
+            "cinematic realism, documentary lighting, historically accurate materials, authentic setting";
+        focus =
+            "Show a vivid, realistic moment from this era — people, inventions, and environment as they appeared between the given years.";
+        aspect_ratio = "16:9";
+        guidance_scale = 3.3;
+    }
+
+    const prompt = [
+        `Create a ${style} artwork illustrating humanity between ${startYear} and ${endYear}.`,
+        `Comet: ${cometName}.`,
+        focus,
+        `The image should visually express key ideas, inventions, and cultural developments from the following summary:`,
         condensedSummary,
     ].join("\n");
+
+    return {
+        prompt,
+        aspect_ratio,
+        guidance_scale,
+        enhance_prompt,
+    };
 }
 
 
@@ -275,19 +321,30 @@ function getErrorCode(err: unknown): number | undefined {
     return undefined;
 }
 
-async function generateImage(prompt: string): Promise<FalResult<FalImagePayload>> {
+async function generateImage(
+    imageConfig: ReturnType<typeof buildSummaryImagePrompt>
+): Promise<FalResult<FalImagePayload>> {
+    const { prompt, aspect_ratio, guidance_scale, enhance_prompt } = imageConfig;
+
     const job = await fal.subscribe(IMAGE_MODEL_ID, {
         input: {
             prompt,
-            aspect_ratio: "16:9",
-            guidance_scale: 6.9,
+            aspect_ratio,
+            guidance_scale,
+            enhance_prompt,
             num_images: 1,
         },
         logs: true,
+        // onQueueUpdate: (update) => {
+        //     if (update.status === "IN_PROGRESS") {
+        //         update.logs?.map((log) => log.message).forEach(console.log);
+        //     }
+        // },
     });
 
     return job as FalResult<FalImagePayload>;
 }
+
 
 async function generateText(
     prompt: string,
@@ -523,34 +580,35 @@ export default async ({ req, res, log, error }: HandlerContext) => {
         return res.json({ ok: false, error: "Missing required field `prompt`" }, 400);
     }
 
-    try {
-        if (modelType === "image") {
-            const { data, requestId } = await generateImage(prompt);
-            const imageUrl = data.images?.[0]?.url ?? null;
+    // try {
+    //     if (modelType === "image") {
+    //         const { data, requestId } = await generateImage(prompt);
+    //         const imageUrl = data.images?.[0]?.url ?? null;
 
-            const response: HandlerSuccessResponse = {
-                ok: true,
-                type: "image",
-                requestId,
-                src: typeof imageUrl === "string" ? imageUrl : null,
-            };
+    //         const response: HandlerSuccessResponse = {
+    //             ok: true,
+    //             type: "image",
+    //             requestId,
+    //             src: typeof imageUrl === "string" ? imageUrl : null,
+    //         };
 
-            return res.json(response, 200);
-        }
+    //         return res.json(response, 200);
+    //     }
 
-        const { data, requestId } = await generateText(prompt);
-        const output = extractTextOutput(data);
 
-        const response: HandlerSuccessResponse = {
-            ok: true,
-            type: "text",
-            requestId,
-            output,
-        };
+    //     const { data, requestId } = await generateText(prompt);
+    //     const output = extractTextOutput(data);
 
-        return res.json(response, 200);
-    } catch (err) {
-        error(err);
-        return res.json({ ok: false, error: "Failed to generate content" }, 500);
-    }
+    //     const response: HandlerSuccessResponse = {
+    //         ok: true,
+    //         type: "text",
+    //         requestId,
+    //         output,
+    //     };
+
+    //     return res.json(response, 200);
+    // } catch (err) {
+    //     error(err);
+    //     return res.json({ ok: false, error: "Failed to generate content" }, 500);
+    // }
 }
