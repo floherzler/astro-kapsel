@@ -281,7 +281,7 @@ async function generateImage(prompt: string): Promise<FalResult<FalImagePayload>
     const job = await fal.subscribe(IMAGE_MODEL_ID, {
         input: {
             prompt,
-            image_size: "landscape_4_3",
+            aspect_ratio: "1:1",
             num_images: 1,
         },
         logs: true,
