@@ -220,16 +220,14 @@ function buildSummaryImagePrompt(
     const condensedSummary = summary.length > 900 ? `${summary.slice(0, 897)}…` : summary;
 
     return [
-        `Create a cinematic, highly detailed science fiction illustration for a historical space mission briefing.`,
-        `Comet: ${cometName}`,
-        `Era: ${Math.round(startYear)}–${Math.round(endYear)}`,
-        `Scene: The viewer looks out from the observation deck of a futuristic spacecraft orbiting Earth or near a distant planet.`,
-        `Show scientists, explorers, or historians observing the comet through large viewing windows, holographic displays showing orbital data, and atmospheric lighting.`,
-        `Include visible technological panels, reflections, and ambient lighting that conveys scale and awe.`,
-        `The mood should feel both human and historical — symbolizing reflection on humanity’s progress between ${Math.round(startYear)} and ${Math.round(endYear)}.`,
-        `Style: ultra-detailed, photorealistic, cinematic lighting, high depth, 32k detail, volumetric light, wide-angle composition.`,
-        `Avoid empty space scenes; focus on storytelling elements, interior detail, and the human presence.`,
-        `Inspiration text (for thematic tone, not literal illustration):`,
+        `Depict a richly detailed historical scene inspired by humanity’s progress between ${Math.round(startYear)} and ${Math.round(endYear)}.`,
+        `The image should visually reflect the key events, cultures, and inventions described below.`,
+        `Each element must appear historically grounded — accurate architecture, clothing, and environment for its period.`,
+        `Avoid futuristic, sci-fi, or abstract compositions.`,
+        `Art style: cinematic realism, painterly lighting, natural color grading, detailed atmosphere.`,
+        `Composition: focus on storytelling, showing people, tools, structures, and environments relevant to the summary.`,
+        `Comet reference (${cometName}) can be subtle, as a symbolic element in the sky if appropriate.`,
+        `Summary context:`,
         condensedSummary,
     ].join("\n");
 }
@@ -281,7 +279,8 @@ async function generateImage(prompt: string): Promise<FalResult<FalImagePayload>
     const job = await fal.subscribe(IMAGE_MODEL_ID, {
         input: {
             prompt,
-            aspect_ratio: "1:1",
+            aspect_ratio: "16:9",
+            guidance_scale: 6.9,
             num_images: 1,
         },
         logs: true,
