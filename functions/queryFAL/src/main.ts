@@ -274,6 +274,13 @@ export function buildSummaryImagePrompt(
         guidance_scale = 3.4;
     }
 
+    const prompt = [
+        `Create a ${style} artwork illustrating humanity between ${startYear} and ${endYear}.`,
+        `Comet: ${cometName}.`,
+        focus,
+        `The image should visually express key ideas, inventions, and cultural developments from the following summary:`,
+        condensedSummary,
+    ].join("\n");
 
     return {
         prompt,
