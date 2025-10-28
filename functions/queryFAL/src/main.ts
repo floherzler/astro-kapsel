@@ -213,7 +213,17 @@ Return a JSON object:
 
 interface ImagePromptConfig {
     prompt: string;
-    aspect_ratio: "21:9" | "16:9" | "4:3" | "3:2" | "1:1" | "2:3" | "3:4" | "9:16" | "9:21";
+    aspect_ratio:
+    | "21:9"
+    | "1:1"
+    | "4:3"
+    | "3:2"
+    | "2:3"
+    | "5:4"
+    | "4:5"
+    | "3:4"
+    | "16:9"
+    | "9:16";
     guidance_scale: number;
     enhance_prompt: boolean;
 }
