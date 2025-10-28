@@ -82,7 +82,7 @@ type FalResult<TPayload> = {
     [key: string]: unknown;
 };
 
-const IMAGE_MODEL_ID = "fal-ai/flux-pro/kontext";
+const IMAGE_MODEL_ID = "fal-ai/flux-pro/kontext/text-to-image";
 const TEXT_ORCHESTRATOR_ID = "fal-ai/any-llm";
 const DEFAULT_TEXT_MODEL = "google/gemini-2.5-flash-lite";
 
