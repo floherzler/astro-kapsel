@@ -1,10 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Functions, Query } from "appwrite";
 import type { Models } from "appwrite";
-import { CockpitPanel, CockpitPanelHeader } from "@/components/cockpit/panel";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -31,6 +38,7 @@ export type SummaryRecord = {
   from_flyby?: unknown;
   to_flyby?: unknown;
   llm_model_used?: string | null;
+  image_url?: string | null;
 };
 
 type FlybyWindow = {
@@ -90,11 +98,17 @@ function makeWindowKey(a: string, b: string) {
   return [a, b].sort().join("::");
 }
 
+function getYearValue(row: FlybyRow): number {
+  if (typeof row.year === "number" && Number.isFinite(row.year)) return row.year;
+  const numeric = Number(row.year);
+  return Number.isFinite(numeric) ? numeric : Number.NEGATIVE_INFINITY;
+}
+
 function sortFlybys(rows: FlybyRow[]) {
   return rows.slice().sort((a, b) => {
-    const ay = typeof a.year === "number" ? a.year : Number(a.year ?? 0);
-    const by = typeof b.year === "number" ? b.year : Number(b.year ?? 0);
-    return by - ay;
+    const ay = getYearValue(a);
+    const by = getYearValue(b);
+    return ay - by;
   });
 }
 
@@ -103,15 +117,16 @@ function buildWindows(flybys: FlybyRow[]): FlybyWindow[] {
   const sorted = sortFlybys(flybys);
   const windows: FlybyWindow[] = [];
   for (let i = 0; i < sorted.length - 1; i += 1) {
-    const from = sorted[i];
-    const to = sorted[i + 1];
+    const candidates = [sorted[i], sorted[i + 1]].sort((a, b) => getYearValue(a) - getYearValue(b));
+    const from = candidates[0];
+    const to = candidates[1];
     windows.push({
       id: makeWindowKey(from.$id, to.$id),
       from,
       to,
     });
   }
-  return windows;
+  return windows.sort((a, b) => getYearValue(b.from) - getYearValue(a.from));
 }
 
 function getExecutionOutput(execution: Models.Execution): string | null {
@@ -124,14 +139,38 @@ function getExecutionOutput(execution: Models.Execution): string | null {
   return typeof rawOutput === "string" ? rawOutput : String(rawOutput);
 }
 
-export default function SummaryPanel() {
-  const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
+type SummaryPanelContextValue = {
+  comets: CometRow[];
+  selectedCometId: string;
+  setSelectedCometId: (id: string) => void;
+  flybyWindows: FlybyWindow[];
+  summaryByWindow: Map<string, SummaryRecord>;
+  selectedWindowId: string;
+  setSelectedWindowId: (id: string) => void;
+  selectedSummary: SummaryRecord | null;
+  selectedWindow: FlybyWindow | null;
+  statusMessage: string | null;
+  panelError: string | null;
+  loading: boolean;
+  pendingWindowId: string | null;
+  handleGenerate: (windowToUse: FlybyWindow | null) => Promise<void>;
+  clearStatus: () => void;
+  refresh: () => Promise<void>;
+};
+
+const SummaryPanelContext = createContext<SummaryPanelContextValue | null>(null);
+
+function useSummaryPanelState(): SummaryPanelContextValue {
+  const databaseId =
+    process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableComets =
     process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || process.env.APPWRITE_TABLE_COMETS || "comets";
   const tableFlybys =
     process.env.NEXT_PUBLIC_APPWRITE_TABLE_FLYBYS || process.env.APPWRITE_TABLE_FLYBYS || "flybys";
   const tableSummaries =
-    process.env.NEXT_PUBLIC_APPWRITE_TABLE_SUMMARIES || process.env.APPWRITE_TABLE_SUMMARIES || "summaries";
+    process.env.NEXT_PUBLIC_APPWRITE_TABLE_SUMMARIES ||
+    process.env.APPWRITE_TABLE_SUMMARIES ||
+    "summaries";
   const functionId =
     process.env.NEXT_PUBLIC_APPWRITE_QUERY_FAL || process.env.APPWRITE_QUERY_FAL || "queryFAL";
 
@@ -161,7 +200,9 @@ export default function SummaryPanel() {
         return labelA.localeCompare(labelB);
       });
       setComets(rows);
-      if (rows.length > 0) setSelectedCometId((prev) => prev || rows[0].$id);
+      if (rows.length > 0) {
+        setSelectedCometId((prev) => prev || rows[0].$id);
+      }
     } catch (err) {
       setPanelError(`Failed to load comets: ${String((err as Error)?.message ?? err)}`);
     }
@@ -198,6 +239,7 @@ export default function SummaryPanel() {
                 "summary",
                 "generated_at",
                 "llm_model_used",
+                "image_url",
                 "comet.$id",
                 "from_flyby.$id",
                 "from_flyby.year",
@@ -250,7 +292,18 @@ export default function SummaryPanel() {
           });
         setSummaryByWindow(map);
 
-        const defaultWindowId = windows[0]?.id ?? "";
+        // Restore last selection for this comet from localStorage if available
+        let restoredId = "";
+        try {
+          if (typeof window !== "undefined") {
+            const key = `cockpit:selectedWindow:${cometId}`;
+            const val = window.localStorage.getItem(key);
+            if (val && windows.some((w) => w.id === val)) restoredId = val;
+          }
+        } catch {
+          // ignore storage errors
+        }
+        const defaultWindowId = restoredId || windows[0]?.id || "";
         setSelectedWindowId((prev) => (prev && windows.some((w) => w.id === prev) ? prev : defaultWindowId));
         setStatusMessage(null);
         if (process.env.NODE_ENV !== "production") {
@@ -316,9 +369,7 @@ export default function SummaryPanel() {
               databaseId,
               tableId: tableSummaries,
               rowId: payload.$id,
-              queries: [
-                Query.select(["comet.$id"]),
-              ],
+              queries: [Query.select(["comet.$id"])],
             })) as SummaryRecord;
             const cometId = getRelationId(row.comet);
             if (cometId && cometId !== selectedCometId) return;
@@ -348,10 +399,15 @@ export default function SummaryPanel() {
     };
   }, [databaseId, tableSummaries, tableFlybys, selectedCometId, tables, loadCometData]);
 
-  const selectedSummary = selectedWindowId ? summaryByWindow.get(selectedWindowId) ?? null : null;
-  const selectedWindow = selectedWindowId
-    ? flybyWindows.find((window) => window.id === selectedWindowId) ?? null
-    : null;
+  const selectedSummary = useMemo(
+    () => (selectedWindowId ? summaryByWindow.get(selectedWindowId) ?? null : null),
+    [selectedWindowId, summaryByWindow]
+  );
+
+  const selectedWindow = useMemo(
+    () => (selectedWindowId ? flybyWindows.find((window) => window.id === selectedWindowId) ?? null : null),
+    [selectedWindowId, flybyWindows]
+  );
 
   const handleGenerate = useCallback(
     async (windowToUse: FlybyWindow | null) => {
@@ -363,7 +419,7 @@ export default function SummaryPanel() {
       setPanelError(null);
       setStatusMessage(null);
       setPendingWindowId(windowToUse.id);
-      setStatusMessage("Generating summary…");
+      setStatusMessage("Generating briefing and visualization…");
       try {
         const exec = await functions.createExecution({
           functionId,
@@ -420,143 +476,389 @@ export default function SummaryPanel() {
         setPendingWindowId(null);
       }
     },
-    [databaseId, functionId, functions, loadCometData, pendingWindowId, selectedCometId, tableSummaries, tables]
+    [
+      databaseId,
+      functionId,
+      functions,
+      loadCometData,
+      pendingWindowId,
+      selectedCometId,
+      tableSummaries,
+      tables,
+    ]
+  );
+
+  const clearStatus = useCallback(() => {
+    setStatusMessage(null);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!selectedCometId) return;
+    await loadCometData(selectedCometId);
+  }, [selectedCometId, loadCometData]);
+
+  return useMemo(
+    () => ({
+      comets,
+      selectedCometId,
+      setSelectedCometId,
+      flybyWindows,
+      summaryByWindow,
+      selectedWindowId,
+      setSelectedWindowId,
+      selectedSummary,
+      selectedWindow,
+      statusMessage,
+      panelError,
+      loading,
+      pendingWindowId,
+      handleGenerate,
+      clearStatus,
+      refresh,
+    }),
+    [
+      comets,
+      selectedCometId,
+      flybyWindows,
+      summaryByWindow,
+      selectedWindowId,
+      selectedSummary,
+      selectedWindow,
+      statusMessage,
+      panelError,
+      loading,
+      pendingWindowId,
+      handleGenerate,
+      clearStatus,
+      refresh,
+    ]
+  );
+}
+
+export function SummaryProvider({ children }: { children: ReactNode }) {
+  const value = useSummaryPanelState();
+  return <SummaryPanelContext.Provider value={value}>{children}</SummaryPanelContext.Provider>;
+}
+
+export default SummaryProvider;
+
+function useSummaryPanelContext() {
+  const ctx = useContext(SummaryPanelContext);
+  if (!ctx) {
+    throw new Error("Summary panel components must be wrapped in <SummaryProvider />");
+  }
+  return ctx;
+}
+
+// Expose lightweight layout info for outer layouts without leaking full context
+export function useSummaryLayoutInfo() {
+  const { selectedWindow } = useSummaryPanelContext();
+  const duration = useMemo(() => {
+    if (!selectedWindow) return null;
+    return Math.abs(getYearValue(selectedWindow.to) - getYearValue(selectedWindow.from));
+  }, [selectedWindow]);
+  const orientation = duration != null && duration > 100 ? "poster" : "wide"; // wide covers 16:9 and 21:9
+  const aspect = useMemo(() => {
+    if (duration == null) return "16 / 9";
+    if (duration < 10) return "16 / 9";
+    if (duration <= 100) return "21 / 9";
+    return "9 / 16";
+  }, [duration]);
+  const type = aspect === "21 / 9" ? "21:9" : aspect === "9 / 16" ? "9:16" : "16:9";
+  const ratio = type === "21:9" ? 21 / 9 : type === "9:16" ? 9 / 16 : 16 / 9;
+  return { orientation, aspect, duration, type, ratio } as const;
+}
+
+export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
+  const {
+    comets,
+    selectedCometId,
+    setSelectedCometId,
+    flybyWindows,
+    summaryByWindow,
+    selectedWindowId,
+    setSelectedWindowId,
+    handleGenerate,
+    pendingWindowId,
+    loading,
+    panelError,
+    clearStatus,
+  } = useSummaryPanelContext();
+
+  // Persist selected window per comet
+  useEffect(() => {
+    if (!selectedCometId || !selectedWindowId) return;
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          `cockpit:selectedWindow:${selectedCometId}`,
+          selectedWindowId
+        );
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedCometId, selectedWindowId]);
+
+  const currentIndex = useMemo(() => {
+    const idx = flybyWindows.findIndex((w) => w.id === selectedWindowId);
+    return idx >= 0 ? idx : 0;
+  }, [flybyWindows, selectedWindowId]);
+
+  const go = useCallback(
+    (dir: 1 | -1) => {
+      if (flybyWindows.length === 0) return;
+      const next = (currentIndex + dir + flybyWindows.length) % flybyWindows.length;
+      const win = flybyWindows[next];
+      setSelectedWindowId(win.id);
+      clearStatus();
+    },
+    [currentIndex, flybyWindows, setSelectedWindowId, clearStatus]
   );
 
   return (
-    <CockpitPanel className="h-full">
-      <CockpitPanelHeader
-        title="Summary Uplink"
-        subtitle="Generate historical briefing"
-        actions={
-          <Dropdown
-            value={selectedCometId}
-            onChange={setSelectedCometId}
-            items={
-              comets.length > 0
-                ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
-                : [{ value: "", label: "No comets available" }]
-            }
-            className="min-w-[14rem]"
-          />
-        }
-      />
+    <div
+      className={`flex min-h-0 flex-col rounded-2xl border border-slate-800/60 bg-slate-950/80 p-4 text-xs text-slate-200/80 ${className}`}
+    >
+      {/* Compact header */}
+      <div className="mb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.45em] text-cyan-200/80">Summary Uplink</p>
+          <p className="text-[10px] uppercase tracking-[0.35em] text-slate-300/70">Select flyby window</p>
+        </div>
+        <Dropdown
+          value={selectedCometId}
+          onChange={(value) => {
+            setSelectedCometId(value);
+            clearStatus();
+          }}
+          items={
+            comets.length > 0
+              ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
+              : [{ value: "", label: "No comets available" }]
+          }
+          className="min-w-[13rem]"
+        />
+      </div>
 
-      <div className="flex h-full flex-col gap-4 p-6 text-xs text-slate-200/80">
-        {panelError ? (
-          <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-[11px] text-red-200">
-            {panelError}
-          </div>
-        ) : null}
+      {panelError ? (
+        <div className="mb-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-200">
+          {panelError}
+        </div>
+      ) : null}
 
-        <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <div className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-[0.35em] text-cyan-200/70">Flyby Windows</span>
-              {loading ? <span className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/60">Loading…</span> : null}
+      {/* Carousel-like selector with arrows (minified) */}
+      <div className="mt-1 flex items-center gap-2">
+        <Button
+          size="sm"
+          variant="space"
+          onClick={() => go(-1)}
+          disabled={flybyWindows.length === 0}
+          aria-label="Previous window"
+        >
+          ←
+        </Button>
+
+        <div className="flex-1">
+          {flybyWindows.length === 0 ? (
+            <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-center text-[11px] text-slate-300/80">
+              {loading ? "Loading…" : "No flybys found for this comet."}
             </div>
-            <ScrollArea className="mt-3 flex-1 pr-3">
-              <div className="space-y-2 pb-4">
-                {flybyWindows.length === 0 ? (
-                  <div className="rounded-lg border border-white/15 bg-white/5 px-3 py-2 text-[11px] text-slate-300/80">
-                    No flybys found for this comet.
-                  </div>
-                ) : (
-                  flybyWindows.map((window) => {
-                    const summary = summaryByWindow.get(window.id);
-                    const isSelected = selectedWindowId === window.id;
-                    const isPending = pendingWindowId === window.id;
-                    return (
-                      <div
-                        key={window.id}
-                        className={`flex items-center justify-between gap-3 rounded-xl border px-3 py-2 transition ${isSelected
-                            ? "border-cyan-400/60 bg-cyan-500/15 text-cyan-100"
-                            : "border-white/10 bg-white/5 text-slate-200/80"
-                          }`}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedWindowId(window.id);
-                            setStatusMessage(null);
-                          }}
-                          className="flex flex-1 flex-col text-left"
-                        >
-                          <span className="text-[11px] uppercase tracking-[0.3em]">
-                            {formatYear(window.from.year)} → {formatYear(window.to.year)}
-                          </span>
-                          <span className="text-[10px] text-slate-300/70">
-                            IDs {window.from.$id.slice(0, 8)}… / {window.to.$id.slice(0, 8)}…
-                          </span>
-                          <span className={`text-[10px] ${summary ? "text-emerald-300/80" : "text-cyan-200/60"}`}>
-                            {summary ? "Summary available" : "Summary missing"}
-                          </span>
-                        </button>
-                        {!summary ? (
-                          <Button
-                            size="sm"
-                            variant="space"
-                            onClick={() => handleGenerate(window)}
-                            disabled={Boolean(pendingWindowId) && pendingWindowId !== window.id}
-                          >
-                            {isPending ? (
-                              <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em]">
-                                <Spinner />
-                                Generating
-                              </span>
-                            ) : (
-                              "Generate"
-                            )}
-                          </Button>
-                        ) : null}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </ScrollArea>
-          </div>
-
-          <div className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="flex items-start justify-between gap-3 text-[10px] uppercase tracking-[0.35em] text-cyan-200/70">
-              <div className="flex flex-col gap-1">
-                <span>AI Generated Summary</span>
-                {selectedWindow ? (
-                  <span className="text-[10px] text-slate-300/70">
-                    Window {formatYear(selectedWindow.from.year)} → {formatYear(selectedWindow.to.year)}
-                  </span>
-                ) : null}
-              </div>
-              {statusMessage ? <span className="text-[10px] text-cyan-200/70">{statusMessage}</span> : null}
-            </div>
-            <div className="mt-3 flex flex-1 flex-col overflow-hidden">
-              {selectedSummary ? (
-                <>
-                  <div className="flex items-start justify-between gap-3 text-[11px] uppercase tracking-[0.3em] text-cyan-100">
-                    <span>{selectedSummary.title ?? "Summary"}</span>
-                    <span className="text-[10px] text-cyan-200/70">
-                      {selectedSummary.generated_at ? new Date(selectedSummary.generated_at).toLocaleString() : ""}
+          ) : (
+            (() => {
+              const window = flybyWindows[currentIndex];
+              const summary = summaryByWindow.get(window.id);
+              const isPending = pendingWindowId === window.id;
+              return (
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedWindowId(window.id);
+                      clearStatus();
+                    }}
+                    className="flex flex-1 flex-col text-left"
+                  >
+                    <span className="text-[11px] uppercase tracking-[0.3em] text-cyan-100">
+                      {formatYear(window.from.year)} → {formatYear(window.to.year)}
                     </span>
-                  </div>
-                  <ScrollArea className="mt-3 flex-1 pr-3 text-[13px] leading-relaxed text-slate-200/90">
-                    <p className="whitespace-pre-wrap">{selectedSummary.summary ?? "No summary available."}</p>
-                  </ScrollArea>
-                  <div className="mt-3 flex items-center justify-between text-[10px] uppercase tracking-[0.3em] text-cyan-200/60">
-                    <span>Model: {selectedSummary.llm_model_used ?? "Unknown"}</span>
-                    <span className="rounded-md border border-emerald-400/60 bg-emerald-500/15 px-2 py-1 text-[9px] tracking-[0.45em] text-emerald-100">
-                      AI GENERATED
+                    <span className={`text-[10px] ${summary ? "text-emerald-300/80" : "text-cyan-200/60"}`}>
+                      {summary ? "Summary available" : "Summary missing"}
                     </span>
-                  </div>
-                </>
-              ) : (
-                <div className="flex flex-1 items-center justify-center text-center text-[11px] text-slate-300/70">
-                  {selectedWindow ? "No summary exists yet for this window." : "Select a flyby window to view its briefing."}
+                  </button>
+                  {!summary ? (
+                    <Button
+                      size="sm"
+                      variant="space"
+                      onClick={() => handleGenerate(window)}
+                      disabled={Boolean(pendingWindowId) && pendingWindowId !== window.id}
+                    >
+                      {isPending ? (
+                        <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em]">
+                          <Spinner />
+                          Generating
+                        </span>
+                      ) : (
+                        "Generate"
+                      )}
+                    </Button>
+                  ) : null}
                 </div>
-              )}
-            </div>
-          </div>
+              );
+            })()
+          )}
+        </div>
+
+        <Button
+          size="sm"
+          variant="space"
+          onClick={() => go(1)}
+          disabled={flybyWindows.length === 0}
+          aria-label="Next window"
+        >
+          →
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function SummaryDetailsPanel({ className = "" }: { className?: string }) {
+  const {
+    selectedSummary,
+    selectedWindow,
+    statusMessage,
+    panelError,
+    pendingWindowId,
+    selectedWindowId,
+  } = useSummaryPanelContext();
+
+  const isPending = Boolean(pendingWindowId && pendingWindowId === selectedWindowId);
+  const generatedAt = selectedSummary?.generated_at
+    ? new Date(selectedSummary.generated_at).toLocaleString()
+    : null;
+
+  return (
+    <div
+      className={`flex min-h-0 flex-col p-6 text-sm text-slate-200/90 ${className}`}
+    >
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.45em] text-cyan-200/80">AI Briefing {selectedWindow
+            ? `Window ${formatYear(selectedWindow.from.year)} → ${formatYear(selectedWindow.to.year)}`
+            : "Select a window to review"}
+          </p>
+        </div>
+        {statusMessage ? (
+          <span className="text-[10px] uppercase tracking-[0.35em] text-cyan-200/70">
+            {statusMessage}
+          </span>
+        ) : null}
+      </div>
+
+      {panelError ? (
+        <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-[11px] text-red-200">
+          {panelError}
+        </div>
+      ) : null}
+
+      {isPending ? (
+        <div className="mt-4 flex items-center gap-3 text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">
+          <Spinner />
+          Generating content…
+        </div>
+      ) : null}
+
+      <div className="mt-5 flex min-h-0 flex-1 flex-col rounded-2xl border border-white/10 bg-white/5">
+        <div className="flex items-start justify-between gap-3 px-4 py-3 text-[11px] uppercase tracking-[0.3em] text-cyan-100">
+          <span>{selectedSummary?.title ?? "Summary"}</span>
+          {generatedAt ? <span className="text-[10px] text-cyan-200/70">{generatedAt}</span> : null}
+        </div>
+        <ScrollArea className="flex-1 px-4 pb-4 pr-6 text-[13px] leading-relaxed text-slate-200/90">
+          <p className="whitespace-pre-wrap">
+            {selectedSummary?.summary ??
+              (selectedWindow
+                ? "No summary exists yet for this window. Generate one from the flyby list above."
+                : "Select a flyby window to view or generate its mission briefing.")}
+          </p>
+        </ScrollArea>
+        <div className="flex items-center justify-between px-4 pb-3 text-[10px] uppercase tracking-[0.3em] text-cyan-200/60">
+          <span>Model: {selectedSummary?.llm_model_used ?? "Unknown"}</span>
+          {selectedSummary ? (
+            <span className="rounded-md border border-emerald-400/60 bg-emerald-500/15 px-2 py-1 text-[9px] tracking-[0.45em] text-emerald-100">
+              AI GENERATED
+            </span>
+          ) : null}
         </div>
       </div>
-    </CockpitPanel>
+    </div>
+  );
+}
+
+export function SummaryVisualizationPanel({ className = "" }: { className?: string }) {
+  const { selectedSummary, selectedWindow, handleGenerate, pendingWindowId } = useSummaryPanelContext();
+  const isPending = selectedWindow ? pendingWindowId === selectedWindow.id : false;
+  const isDisabled = !selectedWindow || (pendingWindowId && pendingWindowId !== selectedWindow?.id);
+
+  // Choose aspect ratio by flyby duration
+  const aspect = useMemo(() => {
+    if (!selectedWindow) return "16 / 9";
+    const from = getYearValue(selectedWindow.from);
+    const to = getYearValue(selectedWindow.to);
+    const delta = Math.abs(to - from);
+    if (delta < 10) return "16 / 9"; // standard
+    if (delta <= 100) return "21 / 9"; // panoramic
+    return "9 / 16"; // poster
+  }, [selectedWindow]);
+  const isPoster = aspect === "9 / 16";
+
+  return (
+    <div className={`relative flex h-full w-full items-center justify-center overflow-hidden p-3 ${className}`}>
+      <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-inner">
+        {selectedSummary?.image_url ? (
+          <img
+            src={selectedSummary.image_url}
+            alt={selectedSummary.title ?? "Generated comet visualization"}
+            className="h-full w-full object-contain"
+            loading="lazy"
+          />
+        ) : (
+          <div className="absolute inset-0 grid place-items-center px-4 text-center text-[12px] text-slate-300/70">
+            <div className="max-w-[22rem]">
+              <span className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">Visualization pending</span>
+              <p className="mt-2 text-sm text-slate-300/80">
+                {selectedWindow
+                  ? "Generate the visualization for the selected window."
+                  : "Select a flyby window and request a visualization."}
+              </p>
+            </div>
+          </div>
+        )}
+        {selectedSummary?.image_url ? (
+          <a href={selectedSummary.image_url} target="_blank" rel="noreferrer" className="absolute right-3 top-3">
+            <Button size="sm" variant="space">
+              Open
+            </Button>
+          </a>
+        ) : null}
+        <div className="absolute inset-x-0 bottom-3 flex justify-center">
+          <Button
+            size="sm"
+            variant="space"
+            onClick={() => handleGenerate(selectedWindow ?? null)}
+            disabled={isDisabled || isPending}
+          >
+            {selectedSummary?.image_url ? null : isPending ? (
+              <span className="flex items-center gap-2">
+                <Spinner />
+                Generating…
+              </span>
+            ) : (
+              "Generate Visualization"
+            )}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -21,7 +21,7 @@ function Earth() {
   const axialTilt = useMemo(() => THREE.MathUtils.degToRad(23.4), []);
 
   return (
-    <group ref={meshGroup} rotation={[0, 0, axialTilt]}>
+    <group ref={meshGroup} rotation={[0, 0, axialTilt]} scale={0.75}>
       <mesh>
         <icosahedronGeometry args={[2, 64]} />
         <EarthMaterial sunDirection={SUN_DIRECTION} />
@@ -33,13 +33,17 @@ function Earth() {
 
 function App() {
   return (
-    <Canvas camera={{ position: [0, 0.1, 5] }} gl={{ toneMapping: THREE.NoToneMapping }}>
+    <Canvas
+      camera={{ position: [0, 0.1, 4.5] }}
+      gl={{ toneMapping: THREE.NoToneMapping }}
+      style={{ width: "100%", height: "100%" }}
+    >
       <Earth />
       <hemisphereLight args={[0xffffff, 0x000000, 3]} />
       <directionalLight position={[SUN_DIRECTION.x, SUN_DIRECTION.y, SUN_DIRECTION.z]} />
       <Nebula />
       <Starfield />
-      <OrbitControls />
+      <OrbitControls enableZoom={false} />
     </Canvas>
   );
 }
