@@ -94,6 +94,8 @@ export default function CometList({
   // filters apply in realtime
   const [sortKey, setSortKey] = useState<"id" | "family" | "period" | "last" | "next" | "countdown">("countdown");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const activeFilterCount = selectedClasses.length + selectedBuckets.length;
 
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableId = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || "comets";
@@ -282,6 +284,12 @@ export default function CometList({
   useEffect(() => {
     fetchRows();
   }, [fetchRows]);
+
+  useEffect(() => {
+    if (activeFilterCount > 0) {
+      setFiltersExpanded(true);
+    }
+  }, [activeFilterCount]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -559,69 +567,94 @@ export default function CometList({
         <CardTitle>Comets</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="mb-4 space-y-3">
-          <div className="space-y-2">
-            <div className="text-xs uppercase tracking-[0.35em] text-slate-300/70">Orbit groups</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${selectedClasses.length === 0
-                  ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
-                  : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
-                  }`}
-                onClick={() => setSelectedClasses([])}
-              >
-                All
-              </button>
-              <ToggleGroup
-                type="multiple"
-                value={selectedClasses}
-                onValueChange={(v) => setSelectedClasses(v as string[])}
-                className="flex flex-wrap gap-2"
-              >
-                {orbitClasses.map((c) => (
-                  <ToggleGroupItem
-                    key={c}
-                    value={c}
-                    title={c}
-                    className="rounded-full border border-slate-700/60 px-3 py-1.5 text-xs uppercase tracking-[0.3em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100"
-                  >
-                    {c}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
-            </div>
+        <div className="mb-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[0.25em] text-slate-300/70">Filters</div>
+            <button
+              type="button"
+              onClick={() => setFiltersExpanded((open) => !open)}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-foreground/80 transition hover:bg-white/10 sm:hidden"
+            >
+              {filtersExpanded ? "Hide" : "Show"}
+              {activeFilterCount > 0 && (
+                <span className="inline-flex h-5 min-w-[1.4rem] items-center justify-center rounded-full bg-cyan-500/30 px-1 text-xs font-medium text-cyan-100">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
           </div>
-          <div className="space-y-2">
-            <div className="text-xs uppercase tracking-[0.35em] text-slate-300/70">Duration buckets</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className={`rounded-full px-3 py-1.5 text-xs uppercase tracking-[0.3em] transition-colors ${selectedBuckets.length === 0
-                  ? "border border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
-                  : "border border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
-                  }`}
-                onClick={() => setSelectedBuckets([])}
-              >
-                All
-              </button>
-              <ToggleGroup
-                type="multiple"
-                value={selectedBuckets}
-                onValueChange={(v) => setSelectedBuckets(v as string[])}
-                className="flex flex-wrap gap-2"
-              >
-                {DURATION_BUCKETS.map((b) => (
-                  <ToggleGroupItem
-                    key={b.key}
-                    value={b.key}
-                    title={b.label}
-                    className="rounded-full border border-slate-700/60 px-3 py-1.5 text-xs uppercase tracking-[0.3em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100"
-                  >
-                    {b.label}
-                  </ToggleGroupItem>
-                ))}
-              </ToggleGroup>
+          <div className={`mt-3 space-y-3 sm:mt-2 sm:space-y-0 ${filtersExpanded ? "block" : "hidden"} sm:block`}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-md border border-white/10 bg-white/5 p-3">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300/70">Orbit groups</div>
+                <div className="mt-2">
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
+                    <button
+                      type="button"
+                      className={`flex-shrink-0 rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.2em] transition-colors ${
+                        selectedClasses.length === 0
+                          ? "border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
+                          : "border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
+                      }`}
+                      onClick={() => setSelectedClasses([])}
+                    >
+                      All
+                    </button>
+                    <ToggleGroup
+                      type="multiple"
+                      value={selectedClasses}
+                      onValueChange={(v) => setSelectedClasses(v as string[])}
+                      className="flex flex-nowrap gap-2 md:flex-wrap"
+                    >
+                      {orbitClasses.map((c) => (
+                        <ToggleGroupItem
+                          key={c}
+                          value={c}
+                          title={c}
+                          className="flex-shrink-0 whitespace-nowrap rounded-full border border-slate-700/60 px-3 py-1 text-[11px] uppercase tracking-[0.2em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100 md:flex-shrink"
+                        >
+                          {c}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-md border border-white/10 bg-white/5 p-3">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300/70">Duration buckets</div>
+                <div className="mt-2">
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
+                    <button
+                      type="button"
+                      className={`flex-shrink-0 rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.2em] transition-colors ${
+                        selectedBuckets.length === 0
+                          ? "border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
+                          : "border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
+                      }`}
+                      onClick={() => setSelectedBuckets([])}
+                    >
+                      All
+                    </button>
+                    <ToggleGroup
+                      type="multiple"
+                      value={selectedBuckets}
+                      onValueChange={(v) => setSelectedBuckets(v as string[])}
+                      className="flex flex-nowrap gap-2 md:flex-wrap"
+                    >
+                      {DURATION_BUCKETS.map((b) => (
+                        <ToggleGroupItem
+                          key={b.key}
+                          value={b.key}
+                          title={b.label}
+                          className="flex-shrink-0 whitespace-nowrap rounded-full border border-slate-700/60 px-3 py-1 text-[11px] uppercase tracking-[0.2em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100 md:flex-shrink"
+                        >
+                          {b.label}
+                        </ToggleGroupItem>
+                      ))}
+                    </ToggleGroup>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -677,7 +710,7 @@ export default function CometList({
             <span>{sortDir === "asc" ? "▲" : "▼"}</span>
           </button>
         </div>
-        <ScrollArea className="max-h-[17rem] pr-1">{renderedList(comets)}</ScrollArea>
+        <div className="mt-2">{renderedList(comets)}</div>
         <div className="mt-3 text-[10px] text-foreground/60">Orbital data source: NASA/JPL SBDB</div>
       </CardContent>
     </Card>

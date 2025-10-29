@@ -114,3 +114,37 @@ body {
   10%  { opacity: 1; }
   100% { left: 120%; opacity: 0; }
 }
+
+.fal-orb-glow {
+  animation: fal-orb-glow 6s ease-in-out infinite;
+}
+
+.fal-orb-core {
+  animation: fal-orb-core 6s ease-in-out infinite;
+}
+
+@keyframes fal-orb-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.85;
+  }
+}
+
+@keyframes fal-orb-core {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 35px rgba(248, 113, 113, 0.65);
+  }
+  50% {
+    transform: scale(1.08);
+    box-shadow: 0 0 55px rgba(248, 113, 113, 0.78);
+  }
+}
+
+.cockpit-panel-glow {
+  box-shadow: 0 0 55px -18px rgba(59, 130, 246, 0.58);
+}

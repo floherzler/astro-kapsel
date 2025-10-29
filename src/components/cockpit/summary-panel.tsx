@@ -6,8 +6,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 import client from "@/lib/appwrite";
 import { TablesDB, Functions, Query } from "appwrite";
@@ -15,6 +18,10 @@ import type { Models } from "appwrite";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Card } from "@/components/ui/card";
 
 type CometRow = {
   $id: string;
@@ -47,12 +54,206 @@ type FlybyWindow = {
   to: FlybyRow;
 };
 
+const FAL_AUDIO_URL = "https://fra.cloud.appwrite.io/v1/storage/buckets/summaryImages/files/falFemale/view?project=68ea4bc00031046d613e&mode=admin";
+
 function Spinner() {
   return (
     <span
       className="inline-block h-4 w-4 animate-spin rounded-full border-[1.5px] border-cyan-200/70 border-t-transparent"
       aria-hidden="true"
     />
+  );
+}
+
+function PlayIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={`h-3.5 w-3.5 ${className}`}
+    >
+      <path d="M8 5.143c0-1.316 1.43-2.093 2.57-1.39l8.09 4.857c1.127.677 1.127 2.103 0 2.78l-8.09 4.857C9.43 17.95 8 17.173 8 15.857z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className={`h-3.5 w-3.5 ${className}`}
+    >
+      <path d="M7 5.25c0-.69.56-1.25 1.25-1.25h1.5C10.44 4 11 4.56 11 5.25v13.5c0 .69-.56 1.25-1.25 1.25h-1.5C7.56 20 7 19.44 7 18.75zM13 5.25C13 4.56 13.56 4 14.25 4h1.5C16.44 4 17 4.56 17 5.25v13.5c0 .69-.56 1.25-1.25 1.25h-1.5c-.69 0-1.25-.56-1.25-1.25z" />
+    </svg>
+  );
+}
+
+type PointerPosition = { x: number; y: number };
+
+function distanceBetween(a: PointerPosition, b: PointerPosition) {
+  return Math.hypot(b.x - a.x, b.y - a.y);
+}
+
+function midpointBetween(a: PointerPosition, b: PointerPosition) {
+  return {
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2,
+  };
+}
+
+const MIN_IMAGE_SCALE = 1;
+const MAX_IMAGE_SCALE = 4;
+
+function clampScale(value: number) {
+  return Math.min(MAX_IMAGE_SCALE, Math.max(MIN_IMAGE_SCALE, value));
+}
+
+function InteractiveImage({ src, alt }: { src: string; alt?: string }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [transform, setTransform] = useState<{ x: number; y: number; scale: number }>({
+    x: 0,
+    y: 0,
+    scale: 1,
+  });
+  const transformRef = useRef(transform);
+  const pointersRef = useRef<Map<number, PointerPosition>>(new Map());
+  const pinchRef = useRef<{ distance: number; scale: number } | null>(null);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
+
+  const updateScaleAtPoint = useCallback((nextScale: number, point: PointerPosition) => {
+    setTransform((prev) => {
+      const clampedScale = clampScale(nextScale);
+      if (!containerRef.current) return { ...prev, scale: clampedScale };
+      const rect = containerRef.current.getBoundingClientRect();
+      const px = point.x - rect.left;
+      const py = point.y - rect.top;
+      const scaleRatio = clampedScale / prev.scale;
+      return {
+        scale: clampedScale,
+        x: px - scaleRatio * (px - prev.x),
+        y: py - scaleRatio * (py - prev.y),
+      };
+    });
+  }, []);
+
+  const handleWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const { clientX, clientY, deltaY } = event;
+      const currentScale = transformRef.current.scale;
+      const scaleFactor = deltaY > 0 ? 0.9 : 1.1;
+      const nextScale = clampScale(currentScale * scaleFactor);
+      if (nextScale === currentScale) return;
+      updateScaleAtPoint(nextScale, { x: clientX, y: clientY });
+    },
+    [updateScaleAtPoint]
+  );
+
+  const handlePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    containerRef.current?.setPointerCapture(event.pointerId);
+    pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (pointersRef.current.size === 1) {
+      isDraggingRef.current = true;
+    } else if (pointersRef.current.size === 2) {
+      const points = Array.from(pointersRef.current.values());
+      pinchRef.current = {
+        distance: distanceBetween(points[0], points[1]),
+        scale: transformRef.current.scale,
+      };
+    }
+  }, []);
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pointersRef.current.has(event.pointerId)) return;
+    const prevPoint = pointersRef.current.get(event.pointerId);
+    if (!prevPoint) return;
+    const nextPoint = { x: event.clientX, y: event.clientY };
+    pointersRef.current.set(event.pointerId, nextPoint);
+
+    if (pointersRef.current.size === 2) {
+      isDraggingRef.current = true;
+      const [p1, p2] = Array.from(pointersRef.current.values());
+      const pinchState = pinchRef.current;
+      if (!pinchState) {
+        pinchRef.current = {
+          distance: distanceBetween(p1, p2),
+          scale: transformRef.current.scale,
+        };
+        return;
+      }
+      const newDistance = distanceBetween(p1, p2);
+      if (newDistance <= 0) return;
+      const scaleMultiplier = newDistance / pinchState.distance;
+      const nextScale = clampScale(pinchState.scale * scaleMultiplier);
+      const midpoint = midpointBetween(p1, p2);
+      updateScaleAtPoint(nextScale, midpoint);
+      pinchRef.current = { distance: newDistance, scale: nextScale };
+    } else if (pointersRef.current.size === 1 && isDraggingRef.current) {
+      const dx = nextPoint.x - prevPoint.x;
+      const dy = nextPoint.y - prevPoint.y;
+      if (dx === 0 && dy === 0) return;
+      setTransform((prev) => ({
+        ...prev,
+        x: prev.x + dx,
+        y: prev.y + dy,
+      }));
+    }
+  }, [updateScaleAtPoint]);
+
+  const endPointer = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (pointersRef.current.has(event.pointerId)) {
+      pointersRef.current.delete(event.pointerId);
+    }
+    if (pointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
+    isDraggingRef.current = pointersRef.current.size > 0;
+    containerRef.current?.releasePointerCapture(event.pointerId);
+  }, []);
+
+  const handleDoubleClick = useCallback(() => {
+    setTransform({ x: 0, y: 0, scale: 1 });
+    pinchRef.current = null;
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute inset-0 cursor-grab overflow-hidden rounded-3xl"
+      style={{ touchAction: "none" }}
+      onWheel={handleWheel}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endPointer}
+      onPointerLeave={endPointer}
+      onPointerCancel={endPointer}
+      onDoubleClick={handleDoubleClick}
+    >
+      <img
+        src={src}
+        alt={alt}
+        className="h-full w-full select-none object-contain"
+        style={{
+          transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
+          transformOrigin: "0 0",
+          willChange: "transform",
+          transition: isDraggingRef.current ? "none" : "transform 120ms ease-out",
+        }}
+        loading="lazy"
+        draggable={false}
+      />
+      <div className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-black/40 px-2 py-1 text-[10px] uppercase tracking-[0.3em] text-white/70">
+        {transform.scale.toFixed(2)}x
+      </div>
+    </div>
   );
 }
 
@@ -90,7 +291,8 @@ function formatCometLabel(row: CometRow) {
 
 function formatYear(value?: number | null): string {
   if (value == null) return "Unknown";
-  if (Number.isFinite(value)) return Number(value).toFixed(1);
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return Math.round(numeric).toString();
   return String(value);
 }
 
@@ -126,7 +328,7 @@ function buildWindows(flybys: FlybyRow[]): FlybyWindow[] {
       to,
     });
   }
-  return windows.sort((a, b) => getYearValue(b.from) - getYearValue(a.from));
+  return windows.sort((a, b) => getYearValue(a.from) - getYearValue(b.from));
 }
 
 function getExecutionOutput(execution: Models.Execution): string | null {
@@ -585,6 +787,92 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     clearStatus,
   } = useSummaryPanelContext();
 
+  const falAudioRef = useRef<HTMLAudioElement | null>(null);
+  const falAudioCleanupRef = useRef<(() => void) | null>(null);
+  const [isFalAudioPlaying, setIsFalAudioPlaying] = useState(false);
+  const [isFalAudioLoading, setIsFalAudioLoading] = useState(false);
+
+  const ensureFalAudio = useCallback(() => {
+    if (falAudioRef.current) return falAudioRef.current;
+
+    if (falAudioCleanupRef.current) {
+      falAudioCleanupRef.current();
+      falAudioCleanupRef.current = null;
+    }
+
+    const audio = new Audio(FAL_AUDIO_URL);
+    audio.preload = "auto";
+    audio.loop = false;
+
+    const handlePlaying = () => {
+      setIsFalAudioLoading(false);
+      setIsFalAudioPlaying(true);
+    };
+    const handlePause = () => {
+      setIsFalAudioLoading(false);
+      setIsFalAudioPlaying(false);
+    };
+    const handleEnded = () => {
+      setIsFalAudioLoading(false);
+      setIsFalAudioPlaying(false);
+      audio.currentTime = 0;
+    };
+    const handleError = () => {
+      setIsFalAudioLoading(false);
+      setIsFalAudioPlaying(false);
+      audio.currentTime = 0;
+    };
+
+    audio.addEventListener("playing", handlePlaying);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handleEnded);
+    audio.addEventListener("error", handleError);
+
+    falAudioCleanupRef.current = () => {
+      audio.removeEventListener("playing", handlePlaying);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handleEnded);
+      audio.removeEventListener("error", handleError);
+    };
+
+    falAudioRef.current = audio;
+    return audio;
+  }, []);
+
+  const handleFalAudioToggle = useCallback(() => {
+    const audio = ensureFalAudio();
+    if (!audio) return;
+
+    if (!audio.paused && !audio.ended) {
+      setIsFalAudioLoading(false);
+      setIsFalAudioPlaying(false);
+      audio.pause();
+      audio.currentTime = 0;
+      return;
+    }
+
+    setIsFalAudioLoading(true);
+    audio.currentTime = 0;
+    audio.play().catch(() => {
+      setIsFalAudioLoading(false);
+      setIsFalAudioPlaying(false);
+    });
+  }, [ensureFalAudio]);
+
+  useEffect(() => {
+    return () => {
+      if (falAudioCleanupRef.current) {
+        falAudioCleanupRef.current();
+        falAudioCleanupRef.current = null;
+      }
+      const audio = falAudioRef.current;
+      if (audio) {
+        audio.pause();
+        falAudioRef.current = null;
+      }
+    };
+  }, []);
+
   // Persist selected window per comet
   useEffect(() => {
     if (!selectedCometId || !selectedWindowId) return;
@@ -605,133 +893,201 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     return idx >= 0 ? idx : 0;
   }, [flybyWindows, selectedWindowId]);
 
-  const go = useCallback(
-    (dir: 1 | -1) => {
-      if (flybyWindows.length === 0) return;
-      const next = (currentIndex + dir + flybyWindows.length) % flybyWindows.length;
-      const win = flybyWindows[next];
-      setSelectedWindowId(win.id);
-      clearStatus();
-    },
-    [currentIndex, flybyWindows, setSelectedWindowId, clearStatus]
-  );
+  const activeWindow = flybyWindows[currentIndex] ?? null;
+  const summary = activeWindow ? summaryByWindow.get(activeWindow.id) : undefined;
+  const isPending = activeWindow ? pendingWindowId === activeWindow.id : false;
+  const fromY = activeWindow ? getYearValue(activeWindow.from) : Number.NEGATIVE_INFINITY;
+  const toY = activeWindow ? getYearValue(activeWindow.to) : Number.NEGATIVE_INFINITY;
+  const delta = Number.isFinite(fromY) && Number.isFinite(toY) ? Math.abs(toY - fromY) : 0;
+  const deltaRounded = Math.round(delta);
+
+  if (!activeWindow) {
+    return (
+      <Card
+        className={`aspect-square w-full flex min-h-0 flex-col overflow-visible rounded-2xl border border-slate-800/60 bg-gradient-to-b from-slate-950/85 via-slate-950/70 to-slate-950/85 text-xs text-slate-200/85 cockpit-panel-glow ${className}`}
+      >
+        <div className="flex h-full flex-col items-center justify-center gap-6 px-4 py-6 text-center">
+          <Dropdown
+            value={selectedCometId}
+            onChange={(value) => {
+              setSelectedCometId(value);
+              clearStatus();
+            }}
+            items={
+              comets.length > 0
+                ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
+                : [{ value: "", label: "No comets available" }]
+            }
+            className="w-full max-w-xs text-center"
+          />
+          <div className="text-[12px] text-slate-300/80">
+            {loading ? "Loading…" : "No flybys found for this comet."}
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
-    <div
-      className={`flex min-h-0 flex-col rounded-2xl border border-slate-800/60 bg-slate-950/80 p-4 text-xs text-slate-200/80 ${className}`}
+    <Card
+      className={`relative aspect-square w-full flex min-h-0 flex-col overflow-visible rounded-2xl border border-slate-800/60 bg-gradient-to-b from-slate-950/85 via-slate-950/70 to-slate-950/85 text-xs text-slate-200/85 cockpit-panel-glow ${className}`}
     >
-      {/* Centered comet selector as heading */}
-      <div className="flex items-center justify-center pb-2">
-        <Dropdown
-          value={selectedCometId}
-          onChange={(value) => {
-            setSelectedCometId(value);
-            clearStatus();
-          }}
-          items={
-            comets.length > 0
-              ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
-              : [{ value: "", label: "No comets available" }]
-          }
-          className="min-w-[14rem]"
-        />
-      </div>
-
       {panelError ? (
-        <div className="mb-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-[11px] text-red-200">
+        <div className="absolute top-4 right-4 rounded-lg border border-red-500/40 bg-red-950/30 px-3 py-1.5 text-[11px] text-red-200/90 shadow-[0_0_18px_rgba(248,113,113,0.35)]">
           {panelError}
         </div>
       ) : null}
 
-      {/* Square flyby card with arrows */}
-      <div className="relative mt-1 flex-1 min-h-0">
-        <div className="absolute inset-0 grid grid-cols-[auto_1fr_auto] items-center gap-2">
-          <div className="flex items-center justify-center">
-            <Button size="sm" variant="space" onClick={() => go(-1)} disabled={flybyWindows.length === 0} aria-label="Previous window">
-              ←
-            </Button>
-          </div>
-          <div className="relative h-full w-full">
-            <div className="absolute inset-0 rounded-xl border border-cyan-400/10 bg-gradient-to-b from-slate-900/60 to-slate-900/30 p-4 shadow-[inset_0_0_25px_rgba(59,130,246,0.08)]">
-              {flybyWindows.length === 0 ? (
-                <div className="grid h-full place-items-center text-[11px] text-slate-300/80">
-                  {loading ? "Loading…" : "No flybys found for this comet."}
+      <div className="grid h-full grid-rows-7 items-center justify-items-center gap-3 px-4 py-6 sm:gap-4 sm:px-6 sm:py-8">
+        <div className="flex w-full max-w-xs flex-col items-center justify-center gap-2 sm:max-w-sm">
+          <Dropdown
+            value={selectedCometId}
+            onChange={(value) => {
+              setSelectedCometId(value);
+              clearStatus();
+            }}
+            items={
+              comets.length > 0
+                ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
+                : [{ value: "", label: "No comets available" }]
+            }
+            className="w-full min-w-0 text-center"
+          />
+        </div>
+
+        <div className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/75">
+          Δ {deltaRounded}y
+        </div>
+
+        <div className="text-center text-base font-medium tracking-[0.5em] text-cyan-100 sm:text-lg">
+          {formatYear(activeWindow.from.year)}
+          <span className="px-2 text-cyan-300/80">→</span>
+          {formatYear(activeWindow.to.year)}
+        </div>
+
+        <div className="relative flex items-center justify-center">
+          <span
+            className="fal-orb-glow absolute h-12 w-12 rounded-full bg-red-500/20 blur-2xl sm:h-16 sm:w-16"
+            aria-hidden="true"
+          />
+          <span className="absolute h-10 w-10 rounded-full border border-red-400/40 bg-gradient-to-br from-red-500 via-red-600 to-red-700 shadow-[0_0_25px_rgba(248,113,113,0.55)] sm:h-12 sm:w-12" aria-hidden="true" />
+          <span className="fal-orb-core relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-red-500 via-red-600 to-red-700 shadow-[0_0_35px_rgba(248,113,113,0.65)] sm:h-12 sm:w-12">
+            <span className="h-2.5 w-2.5 rounded-full bg-red-200/90 shadow-[0_0_18px_rgba(248,113,113,0.9)] sm:h-3 sm:w-3" />
+          </span>
+        </div>
+
+        <div className="relative flex w-full items-center justify-center gap-2">
+          <HoverCard>
+            <HoverCardTrigger className="group inline-flex items-center text-[11px] uppercase tracking-[0.35em] text-red-200/85 transition hover:text-red-100">
+              <span className="whitespace-nowrap cursor-help select-none">FAL</span>
+            </HoverCardTrigger>
+            <HoverCardContent
+              align="center"
+              side="center"
+              sideOffset={-6}
+              className="min-w-[16rem] border-red-500/0 bg-slate-950/95 shadow-[0_28px_70px_-38px_rgba(248,113,113,0.6)] sm:min-w-[18rem]"
+            >
+              <div className="flex items-start gap-3 sm:gap-4">
+                <div className="relative flex h-10 w-10 items-center justify-center sm:h-12 sm:w-12">
+                  <span className="absolute h-16 w-16 rounded-full bg-red-500/25 blur-2xl sm:h-20 sm:w-20" aria-hidden="true" />
+                  <span className="absolute h-8 w-8 rounded-full border border-red-400/40 bg-red-600/30 shadow-[0_0_25px_rgba(248,113,113,0.55)] sm:h-12 sm:w-12" aria-hidden="true" />
+                  <span className="relative flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-red-500 via-red-600 to-red-700 shadow-[0_0_30px_rgba(248,113,113,0.65)] sm:h-12 sm:w-12">
+                    <span className="h-2.5 w-2.5 rounded-full bg-red-200/90 shadow-[0_0_18px_rgba(248,113,113,0.9)] sm:h-3 sm:w-3" />
+                  </span>
                 </div>
-              ) : (
-                (() => {
-                  const window = flybyWindows[currentIndex];
-                  const summary = summaryByWindow.get(window.id);
-                  const isPending = pendingWindowId === window.id;
-                  const isSelected = selectedWindowId === window.id;
-                  const idx = currentIndex + 1;
-                  const total = flybyWindows.length;
-                  const fromY = getYearValue(window.from);
-                  const toY = getYearValue(window.to);
-                  const delta = Math.abs(toY - fromY);
-                  const aspect = delta < 10 ? "16:9" : delta <= 100 ? "21:9" : "9:16";
-                  return (
-                    <div className="flex h-full flex-col">
-                      {/* top meta */}
-                      <div className="mb-1 flex flex-col items-center text-[10px] uppercase tracking-[0.35em] text-cyan-200/70">
-                        <span>Window {idx} / {total}</span>
-                        <span className="mt-1">Δ {delta.toFixed(1)}y · {aspect}</span>
-                      </div>
+                <div className="space-y-2 text-left text-[12px] leading-relaxed tracking-normal text-slate-200/90">
+                  <p className="text-[11px] uppercase tracking-[0.45em] text-red-200/85">
+                    fal.ai Operations
+                  </p>
+                  <p className="text-xs sm:text-sm">
+                    Our fal.ai stack taps Gemini 2.5 Flash Lite for flyby briefings and Nano Banana image generation via Google models.
+                  </p>
+                  <p className="text-xs sm:text-sm">
+                    Outputs are written back to Appwrite so the cockpit instantly reflects each generated window.
+                  </p>
+                </div>
+              </div>
+            </HoverCardContent>
+          </HoverCard>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              handleFalAudioToggle();
+            }}
+            disabled={isFalAudioLoading}
+            aria-label={isFalAudioPlaying ? "Pause FAL audio" : "Play FAL audio"}
+            className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-red-400/40 bg-slate-950/80 text-red-200/85 shadow-[0_0_10px_rgba(248,113,113,0.4)] transition hover:text-red-100 hover:border-red-300/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70 ${
+              isFalAudioLoading ? "opacity-70" : ""
+            }`}
+          >
+            {isFalAudioPlaying ? <PauseIcon /> : <PlayIcon />}
+          </button>
+        </div>
 
-                      {/* years */}
-                      <div className="mt-2 flex flex-1 items-center justify-center">
-                        <div className="text-center">
-                          <div className="text-base font-medium tracking-[0.5em] text-cyan-100">
-                            {formatYear(window.from.year)}
-                            <span className="px-2 text-cyan-300/80">→</span>
-                            {formatYear(window.to.year)}
-                          </div>
-                          <div
-                            className={`mt-1 text-[11px] ${summary ? "text-emerald-300/80" : "text-red-200/70 animate-pulse"}`}
-                            style={!summary ? { animationDuration: "2.4s" } : undefined}
-                          >
-                            {summary ? "Summary available" : "Summary missing"}
-                          </div>
-                          {/* {isSelected ? (
-                            <div className="mt-2 inline-flex items-center rounded-md border border-cyan-400/40 bg-cyan-500/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.35em] text-cyan-100">
-                              Selected window
-                            </div>
-                          ) : null} */}
-                        </div>
-                      </div>
+        <div className="flex w-full max-w-[18rem] justify-center sm:max-w-[20rem]">
+          <Button
+            size="sm"
+            variant="space"
+            onClick={() => handleGenerate(activeWindow)}
+            disabled={Boolean(summary) || (Boolean(pendingWindowId) && pendingWindowId !== activeWindow.id)}
+            className={`w-full justify-center ${summary
+              ? "cursor-default border-cyan-400/25 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/15"
+              : !isPending
+                ? "animate-pulse"
+                : ""
+              }`}
+            style={!summary && !isPending ? { animationDuration: "2.4s" } : undefined}
+          >
+            {summary ? (
+              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
+                Briefing ready
+              </span>
+            ) : isPending ? (
+              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/80 sm:text-[12px]">
+                <Spinner /> Contacting FAL…
+              </span>
+            ) : (
+              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
+                Generate with FAL
+              </span>
+            )}
+          </Button>
+        </div>
 
-                      {/* actions */}
-                      <div className="mb-1 flex items-center justify-center">
-                        {!summary ? (
-                          <Button
-                            size="sm"
-                            variant="space"
-                            onClick={() => handleGenerate(window)}
-                            disabled={Boolean(pendingWindowId) && pendingWindowId !== window.id}
-                            className="animate-pulse"
-                            style={{ animationDuration: "2.4s" }}
-                          >
-                            {isPending ? (
-                              <span className="flex items-center gap-2 text-[11px] uppercase tracking-[0.3em]"><Spinner /> Generating</span>
-                            ) : (
-                              "Generate"
-                            )}
-                          </Button>
-                        ) : null}
-                      </div>
-                    </div>
-                  );
-                })()
-              )}
-            </div>
-          </div>
-          <div className="flex items-center justify-center">
-            <Button size="sm" variant="space" onClick={() => go(1)} disabled={flybyWindows.length === 0} aria-label="Next window">
-              →
-            </Button>
+        <div className="flex w-full items-center justify-center">
+          <div className="flex items-center gap-3">
+            {flybyWindows.map((win, dotIndex) => {
+              const hasSummary = summaryByWindow.has(win.id);
+              const dotSelected = selectedWindowId === win.id;
+              const glowClasses = hasSummary
+                ? "bg-emerald-400/80 shadow-[0_0_14px_rgba(52,211,153,0.6)]"
+                : "bg-slate-500/60 shadow-[0_0_10px_rgba(148,163,184,0.35)]";
+              return (
+                <button
+                  key={win.id}
+                  type="button"
+                  onClick={() => {
+                    if (selectedWindowId !== win.id) {
+                      setSelectedWindowId(win.id);
+                      clearStatus();
+                    }
+                  }}
+                  className={`group relative flex h-6 w-6 items-center justify-center rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 ${dotSelected ? "ring-2 ring-cyan-300/70" : "ring-0 hover:scale-110"}`}
+                  aria-label={`Select window ${dotIndex + 1}${hasSummary ? " – briefing ready" : " – no briefing yet"}`}
+                >
+                  <span
+                    className={`block h-2.5 w-2.5 rounded-full transition-all duration-200 ${glowClasses} ${
+                      dotSelected ? "scale-125" : "opacity-70 group-hover:opacity-100"
+                    }`}
+                  />
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -746,99 +1102,110 @@ export function SummaryDetailsPanel({ className = "" }: { className?: string }) 
   } = useSummaryPanelContext();
 
   const isPending = Boolean(pendingWindowId && pendingWindowId === selectedWindowId);
-  const generatedAt = selectedSummary?.generated_at
-    ? new Date(selectedSummary.generated_at).toLocaleString()
+  const generatedDate = selectedSummary?.generated_at ? new Date(selectedSummary.generated_at) : null;
+  const generatedAtDisplay = generatedDate
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(generatedDate)
     : null;
+  const hasSummary = Boolean(selectedSummary);
+  const windowRange = selectedWindow ? `${formatYear(selectedWindow.from.year)} → ${formatYear(selectedWindow.to.year)}` : null;
+  const modelLabel = selectedSummary?.llm_model_used ?? "Unknown";
+
+  const fallbackSummary = selectedWindow
+    ? "No summary exists yet for this window. Generate one from the flyby list above."
+    : "Select a flyby window to view or generate its mission briefing.";
+  const summaryText = selectedSummary?.summary ?? fallbackSummary;
+  const parsedSummaryParagraphs = summaryText
+    .split(/\n{2,}/)
+    .map((segment) => segment.replace(/\n+/g, " ").trim())
+    .filter(Boolean);
+  const normalizedSummaryParagraphs =
+    parsedSummaryParagraphs.length > 0 ? parsedSummaryParagraphs : [summaryText.trim()];
+  const pendingQuote =
+    '"For a moment, nothing happened. Then, after a second or so, nothing continued to happen." - Douglas Adams, The Hitchhiker\'s Guide to the Galaxy';
+  const summaryParagraphs =
+    isPending && !hasSummary
+      ? [...normalizedSummaryParagraphs, pendingQuote]
+      : normalizedSummaryParagraphs;
+
+  const statusBadge = isPending ? (
+    <Badge variant="secondary" className="flex items-center gap-2 self-start border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-100">
+      <Spinner />
+      Generating
+    </Badge>
+  ) : statusMessage ? (
+    <Badge variant="secondary" className="self-start border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-100">
+      {statusMessage}
+    </Badge>
+  ) : null;
+
+  const summaryBody = hasSummary ? (
+    <ScrollArea className="flex-1 px-4 pb-5 pr-6">
+      <div className="space-y-4 text-[13px] leading-relaxed text-slate-200/90">
+        {summaryParagraphs.map((paragraph, idx) => (
+          <p key={idx}>{paragraph}</p>
+        ))}
+      </div>
+    </ScrollArea>
+  ) : (
+    <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+      <div className="max-w-sm space-y-4 text-[13px] leading-relaxed text-slate-300/80">
+        {summaryParagraphs.map((paragraph, idx) => (
+          <p key={idx}>{paragraph}</p>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
-    <div
-      className={`flex min-h-0 flex-col p-6 text-sm text-slate-200/90 ${className}`}
-    >
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.45em] text-cyan-200/80">AI Briefing {selectedWindow
-            ? `Window ${formatYear(selectedWindow.from.year)} → ${formatYear(selectedWindow.to.year)}`
-            : "Select a window to review"}
+    <div className={`flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-800/60 bg-slate-950/60 cockpit-panel-glow ${className}`}>
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-white/5 px-4 py-3">
+        <div className="space-y-1">
+          <p className="text-[10px] uppercase tracking-[0.3em] text-cyan-200/70">
+            {hasSummary ? "Summary" : "Summary missing"}
           </p>
+          <h2 className="max-w-xl text-lg font-medium tracking-[0.18em] text-slate-100 sm:text-xl">
+            {selectedSummary?.title ?? "Awaiting AI briefing"}
+          </h2>
         </div>
-        {statusMessage ? (
-          <span className="text-[10px] uppercase tracking-[0.35em] text-cyan-200/70">
-            {statusMessage}
+        {generatedAtDisplay ? (
+          <span className="text-[11px] uppercase tracking-[0.3em] text-cyan-200/70">
+            {generatedAtDisplay}
           </span>
         ) : null}
       </div>
 
-      {panelError ? (
-        <div className="mt-4 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-2 text-[11px] text-red-200">
-          {panelError}
-        </div>
-      ) : null}
+      {summaryBody}
 
-      {isPending ? (
-        <div className="mt-4 flex items-center gap-3 text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">
-          <Spinner />
-          Generating content…
-        </div>
-      ) : null}
-
-      <div className="mt-5 flex min-h-0 flex-1 flex-col rounded-2xl border border-white/10 bg-white/5">
-        <div className="flex items-start justify-between gap-3 px-4 py-3 text-[11px] uppercase tracking-[0.3em] text-cyan-100">
-          <span>{selectedSummary?.title ?? "Summary"}</span>
-          {generatedAt ? <span className="text-[10px] text-cyan-200/70">{generatedAt}</span> : null}
-        </div>
-        <ScrollArea className="flex-1 px-4 pb-4 pr-6 text-[13px] leading-relaxed text-slate-200/90">
-          <p className="whitespace-pre-wrap">
-            {selectedSummary?.summary ??
-              (selectedWindow
-                ? "No summary exists yet for this window. Generate one from the flyby list above."
-                : "Select a flyby window to view or generate its mission briefing.")}
-          </p>
-        </ScrollArea>
-        <div className="flex items-center justify-between px-4 pb-3 text-[10px] uppercase tracking-[0.3em] text-cyan-200/60">
-          <span>Model: {selectedSummary?.llm_model_used ?? "Unknown"}</span>
-          {selectedSummary ? (
-            <span className="rounded-md border border-emerald-400/60 bg-emerald-500/15 px-2 py-1 text-[9px] tracking-[0.45em] text-emerald-100">
-              AI GENERATED
-            </span>
-          ) : null}
-        </div>
+      <div className="flex flex-wrap items-center justify-center gap-3 border-t border-white/5 bg-slate-950/70 px-4 py-3">
+        <Badge
+          variant="secondary"
+          className={`rounded-full px-3 py-1 text-[10px] tracking-[0.3em] ${hasSummary ? "border-cyan-400/40 bg-cyan-500/15 text-cyan-100" : "border-slate-500/40 bg-transparent text-slate-300"}`}
+        >
+          {hasSummary ? modelLabel : "no generations yet"}
+        </Badge>
       </div>
     </div>
   );
 }
 
 export function SummaryVisualizationPanel({ className = "" }: { className?: string }) {
-  const { selectedSummary, selectedWindow, handleGenerate, pendingWindowId } = useSummaryPanelContext();
-  const isPending = selectedWindow ? pendingWindowId === selectedWindow.id : false;
-  const isDisabled = !selectedWindow || (pendingWindowId && pendingWindowId !== selectedWindow?.id);
-
-  // Choose aspect ratio by flyby duration
-  const aspect = useMemo(() => {
-    if (!selectedWindow) return "16 / 9";
-    const from = getYearValue(selectedWindow.from);
-    const to = getYearValue(selectedWindow.to);
-    const delta = Math.abs(to - from);
-    if (delta < 10) return "16 / 9"; // standard
-    if (delta <= 100) return "21 / 9"; // panoramic
-    return "9 / 16"; // poster
-  }, [selectedWindow]);
-  const isPoster = aspect === "9 / 16";
+  const { selectedSummary, selectedWindow } = useSummaryPanelContext();
 
   return (
-    <div className={`relative flex h-full w-full items-center justify-center overflow-hidden p-3 ${className}`}>
-      <div className="relative h-full w-full overflow-hidden rounded-xl border border-white/10 bg-white/5 shadow-inner">
+    <div className={`flex h-full w-full flex-col justify-between ${className}`}>
+      <div className="relative flex-1 min-h-[220px] overflow-hidden">
         {selectedSummary?.image_url ? (
-          <img
+          <InteractiveImage
             src={selectedSummary.image_url}
             alt={selectedSummary.title ?? "Generated comet visualization"}
-            className="h-full w-full object-contain"
-            loading="lazy"
           />
         ) : (
-          <div className="absolute inset-0 grid place-items-center px-4 text-center text-[12px] text-slate-300/70">
-            <div className="max-w-[22rem]">
-              <span className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">Visualization pending</span>
-              <p className="mt-2 text-sm text-slate-300/80">
+          <div className="absolute inset-0 grid place-items-center px-6 text-center text-[12px] text-slate-300/70">
+            <div className="w-full max-w-[22rem] space-y-3">
+              <span className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">
+                Visualization pending
+              </span>
+              <p className="text-sm text-slate-300/80">
                 {selectedWindow
                   ? "Generate the visualization for the selected window."
                   : "Select a flyby window and request a visualization."}
@@ -846,31 +1213,23 @@ export function SummaryVisualizationPanel({ className = "" }: { className?: stri
             </div>
           </div>
         )}
-        {selectedSummary?.image_url ? (
-          <a href={selectedSummary.image_url} target="_blank" rel="noreferrer" className="absolute right-3 top-3">
+      </div>
+
+      {selectedSummary?.image_url ? (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/5 bg-slate-950/70 px-4 py-3 text-[10px] uppercase tracking-[0.35em]">
+          <Badge
+            variant="secondary"
+            className="border-cyan-400/35 bg-cyan-500/15 text-cyan-100"
+          >
+            google/nano-banana
+          </Badge>
+          <a href={selectedSummary.image_url} target="_blank" rel="noreferrer">
             <Button size="sm" variant="space">
               Open
             </Button>
           </a>
-        ) : null}
-        <div className="absolute inset-x-0 bottom-3 flex justify-center">
-          <Button
-            size="sm"
-            variant="space"
-            onClick={() => handleGenerate(selectedWindow ?? null)}
-            disabled={isDisabled || isPending}
-          >
-            {selectedSummary?.image_url ? null : isPending ? (
-              <span className="flex items-center gap-2">
-                <Spinner />
-                Generating…
-              </span>
-            ) : (
-              "Generate Visualization"
-            )}
-          </Button>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }

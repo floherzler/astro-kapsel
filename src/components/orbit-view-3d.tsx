@@ -8,6 +8,7 @@ import { TablesDB, Query } from "appwrite";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 
 type CometRow = {
   $id: string;
@@ -128,6 +129,8 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
     renderer.setSize(container.clientWidth, targetHeight);
     rendererRef.current = renderer;
     container.appendChild(renderer.domElement);
+    renderer.domElement.style.display = "block";
+    renderer.domElement.style.willChange = "transform";
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.75);
     scene.add(ambient);
@@ -433,18 +436,39 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
 
   const controls = (
     <div className="flex items-center gap-3 text-xs text-foreground/80">
-      <Switch
-        label="Planets"
-        checked={showPlanets}
-        onCheckedChange={setShowPlanets}
-        className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-cyan-200/80"
-      />
-      <Switch
-        label="Kuiper Belt"
-        checked={showKuiper}
-        onCheckedChange={setShowKuiper}
-        className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-cyan-200/80"
-      />
+      <HoverCard>
+        <HoverCardTrigger className="inline-flex items-center">
+          <Switch
+            label="Planets"
+            checked={showPlanets}
+            onCheckedChange={setShowPlanets}
+            className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-cyan-200/80"
+          />
+        </HoverCardTrigger>
+        <HoverCardContent
+          sideOffset={12}
+          className="max-w-xs border-cyan-500/20 bg-slate-950/95 text-[12px] leading-relaxed text-foreground/80 shadow-[0_18px_45px_-30px_rgba(59,130,246,0.55)]"
+        >
+          Toggle on the inner planets to get a grounded sense of scale and speed against real ephemerides from NASA/JPL.
+        </HoverCardContent>
+      </HoverCard>
+
+      <HoverCard>
+        <HoverCardTrigger className="inline-flex items-center">
+          <Switch
+            label="Kuiper Belt"
+            checked={showKuiper}
+            onCheckedChange={setShowKuiper}
+            className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-cyan-200/80"
+          />
+        </HoverCardTrigger>
+        <HoverCardContent
+          sideOffset={12}
+          className="max-w-xs border-cyan-500/20 bg-slate-950/95 text-[12px] leading-relaxed text-foreground/80 shadow-[0_18px_45px_-30px_rgba(59,130,246,0.55)]"
+        >
+          Highlights a ring of icy bodies at 30–50 AU so you can see which comets likely hail from the Kuiper Belt reservoir.
+        </HoverCardContent>
+      </HoverCard>
     </div>
   );
 
