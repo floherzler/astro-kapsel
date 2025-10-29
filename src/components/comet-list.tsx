@@ -57,6 +57,121 @@ function getExecutionResponseBody(execution: ExecutionWithExtras): string {
   return "";
 }
 
+function jdNow(): number {
+  return Date.now() / 86400000 + 2440587.5;
+}
+
+function jdToDate(jd: number): Date {
+  const ms = (jd - 2440587.5) * 86400000;
+  return new Date(ms);
+}
+
+function formatDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function lastNextPerihelion(tpJD?: number | null, periodYears?: number | null): { last?: string; next?: string } {
+  if (!tpJD || !periodYears || periodYears <= 0) return {};
+  const Pdays = periodYears * 365.25;
+  const now = jdNow();
+  const k = Math.floor((now - tpJD) / Pdays);
+  let lastJD = tpJD + k * Pdays;
+  if (lastJD > now) lastJD -= Pdays;
+  const nextJD = lastJD + Pdays;
+  return { last: formatDate(jdToDate(lastJD)), next: formatDate(jdToDate(nextJD)) };
+}
+
+function nextPerihelionJD(tpJD?: number | null, periodYears?: number | null): number | null {
+  if (!tpJD || !periodYears || periodYears <= 0) return null;
+  const Pdays = periodYears * 365.25;
+  const now = jdNow();
+  const k = Math.floor((now - tpJD) / Pdays);
+  let lastJD = tpJD + k * Pdays;
+  if (lastJD > now) lastJD -= Pdays;
+  return lastJD + Pdays;
+}
+
+function lastPerihelionJD(tpJD?: number | null, periodYears?: number | null): number | null {
+  if (!tpJD || !periodYears || periodYears <= 0) return null;
+  const Pdays = periodYears * 365.25;
+  const now = jdNow();
+  const k = Math.floor((now - tpJD) / Pdays);
+  let lastJD = tpJD + k * Pdays;
+  if (lastJD > now) lastJD -= Pdays;
+  return lastJD;
+}
+
+function formatCountdown(nextJD: number | null): { label: string; className: string; rowStyle?: CSSProperties } {
+  if (!nextJD) return { label: "—", className: "bg-white/5 border-white/10 text-foreground/70" };
+  const now = jdNow();
+  const dtDays = nextJD - now;
+  // Extremely soon
+  if (dtDays <= 0.5) {
+    return {
+      label: "today",
+      className: "bg-gradient-to-br from-rose-500/40 to-orange-400/30 text-white border border-rose-400/50 shadow-[0_0_22px_rgba(255,107,107,0.35)]",
+      rowStyle: {
+        boxShadow: `0 0 26px rgba(255,107,107,0.35)`,
+        borderColor: `rgba(255,107,107,0.45)`,
+      },
+    };
+  }
+  // Choose nearest single unit (days, months, or years)
+  const days = Math.max(1, Math.round(dtDays));
+  const months = Math.max(1, Math.round(dtDays / 30.44));
+  const years = Math.max(1, Math.round(dtDays / 365.25));
+
+  // Thresholds: show days if < 32 days; months if >= 32 days and < ~6 months; years if >= ~6 months
+  let label = "";
+  if (dtDays >= 365.25 / 2) {
+    label = years === 1 ? "in 1 year" : `in ${years} years`;
+  } else if (dtDays >= 32) {
+    label = months === 1 ? "in 1 month" : `in ${months} months`;
+  } else {
+    label = days === 1 ? "in 1 day" : `in ${days} days`;
+  }
+
+  // Styling tiers by proximity
+  if (dtDays <= 32) {
+    const t = Math.max(0, Math.min(1, (32 - dtDays) / 32));
+    const r = Math.round(129 + (255 - 129) * t);
+    const g = Math.round(212 + (107 - 212) * t);
+    const b = Math.round(250 + (107 - 250) * t);
+    const alpha = 0.16 + 0.22 * t;
+    const rad = 14 + 12 * t;
+    return {
+      label,
+      className: dtDays <= 15
+        ? "bg-gradient-to-br from-rose-500/35 via-orange-400/25 to-amber-300/10 text-white border-transparent"
+        : dtDays <= 45
+          ? "bg-gradient-to-r from-orange-400/30 to-amber-300/15 text-white border-transparent"
+          : "bg-[#1a2238]/40 text-foreground/80 border border-[#344056]/40",
+      rowStyle: {
+        boxShadow: `0 0 ${rad}px rgba(${r},${g},${b},${alpha})`,
+        borderColor: `rgba(${r},${g},${b},${Math.min(0.45, 0.2 + 0.25 * t)})`,
+      },
+    };
+  }
+  if (dtDays <= 182.5) {
+    return {
+      label,
+      className: "bg-gradient-to-tr from-amber-400/25 to-amber-300/10 text-amber-100 border border-amber-300/30",
+      rowStyle: { boxShadow: `0 0 16px rgba(245,196,67,0.14)`, borderColor: `rgba(245,196,67,0.25)` },
+    };
+  }
+  if (dtDays <= 5 * 365.25) {
+    return {
+      label,
+      className: "bg-gradient-to-br from-accent/20 to-accent/5 text-accent border border-accent/30 shadow-[0_0_12px_rgba(110,203,255,0.2)]",
+      rowStyle: { boxShadow: `0 0 12px rgba(110,203,255,0.16)`, borderColor: `rgba(110,203,255,0.3)` },
+    };
+  }
+  return { label, className: "bg-[#1a2238]/40 border-[#344056]/40 text-foreground/80", rowStyle: undefined };
+}
+
 export default function CometList({
   onVisibleChange,
   variant = "default",
@@ -347,120 +462,6 @@ export default function CometList({
     } finally {
       setSubmitting(false);
     }
-  }
-
-  // --- Helpers for perihelion timing ---
-  function jdNow(): number {
-    return Date.now() / 86400000 + 2440587.5;
-  }
-  function jdToDate(jd: number): Date {
-    const ms = (jd - 2440587.5) * 86400000;
-    return new Date(ms);
-  }
-  function formatDate(d: Date): string {
-    const y = d.getUTCFullYear();
-    const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-    const day = String(d.getUTCDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }
-  function lastNextPerihelion(tpJD?: number | null, periodYears?: number | null): { last?: string; next?: string } {
-    if (!tpJD || !periodYears || periodYears <= 0) return {};
-    const Pdays = periodYears * 365.25;
-    const now = jdNow();
-    const k = Math.floor((now - tpJD) / Pdays);
-    let lastJD = tpJD + k * Pdays;
-    if (lastJD > now) lastJD -= Pdays;
-    const nextJD = lastJD + Pdays;
-    return { last: formatDate(jdToDate(lastJD)), next: formatDate(jdToDate(nextJD)) };
-  }
-
-  function nextPerihelionJD(tpJD?: number | null, periodYears?: number | null): number | null {
-    if (!tpJD || !periodYears || periodYears <= 0) return null;
-    const Pdays = periodYears * 365.25;
-    const now = jdNow();
-    const k = Math.floor((now - tpJD) / Pdays);
-    let lastJD = tpJD + k * Pdays;
-    if (lastJD > now) lastJD -= Pdays;
-    return lastJD + Pdays;
-  }
-
-  function lastPerihelionJD(tpJD?: number | null, periodYears?: number | null): number | null {
-    if (!tpJD || !periodYears || periodYears <= 0) return null;
-    const Pdays = periodYears * 365.25;
-    const now = jdNow();
-    const k = Math.floor((now - tpJD) / Pdays);
-    let lastJD = tpJD + k * Pdays;
-    if (lastJD > now) lastJD -= Pdays;
-    return lastJD;
-  }
-
-  function formatCountdown(nextJD: number | null): { label: string; className: string; rowStyle?: CSSProperties } {
-    if (!nextJD) return { label: "—", className: "bg-white/5 border-white/10 text-foreground/70" };
-    const now = jdNow();
-    const dtDays = nextJD - now;
-    // Extremely soon
-    if (dtDays <= 0.5) {
-      return {
-        label: "today",
-        className: "bg-gradient-to-br from-rose-500/40 to-orange-400/30 text-white border border-rose-400/50 shadow-[0_0_22px_rgba(255,107,107,0.35)]",
-        rowStyle: {
-          boxShadow: `0 0 26px rgba(255,107,107,0.35)`,
-          borderColor: `rgba(255,107,107,0.45)`,
-        },
-      };
-    }
-    // Choose nearest single unit (days, months, or years)
-    const days = Math.max(1, Math.round(dtDays));
-    const months = Math.max(1, Math.round(dtDays / 30.44));
-    const years = Math.max(1, Math.round(dtDays / 365.25));
-
-    // Thresholds: show days if < 32 days; months if >= 32 days and < ~6 months; years if >= ~6 months
-    let label = "";
-    if (dtDays >= 365.25 / 2) {
-      label = years === 1 ? "in 1 year" : `in ${years} years`;
-    } else if (dtDays >= 32) {
-      label = months === 1 ? "in 1 month" : `in ${months} months`;
-    } else {
-      label = days === 1 ? "in 1 day" : `in ${days} days`;
-    }
-
-    // Styling tiers by proximity
-    // Smooth row glow for <= 32 days: blend cool blue -> hot red
-    if (dtDays <= 32) {
-      const t = Math.max(0, Math.min(1, (32 - dtDays) / 32));
-      const r = Math.round(129 + (255 - 129) * t);
-      const g = Math.round(212 + (107 - 212) * t);
-      const b = Math.round(250 + (107 - 250) * t);
-      const alpha = 0.16 + 0.22 * t;
-      const rad = 14 + 12 * t;
-      return {
-        label,
-        className: dtDays <= 15
-          ? "bg-gradient-to-br from-rose-500/35 via-orange-400/25 to-amber-300/10 text-white border-transparent"
-          : dtDays <= 45
-            ? "bg-gradient-to-r from-orange-400/30 to-amber-300/15 text-white border-transparent"
-            : "bg-[#1a2238]/40 text-foreground/80 border border-[#344056]/40",
-        rowStyle: {
-          boxShadow: `0 0 ${rad}px rgba(${r},${g},${b},${alpha})`,
-          borderColor: `rgba(${r},${g},${b},${Math.min(0.45, 0.2 + 0.25 * t)})`,
-        },
-      };
-    }
-    if (dtDays <= 182.5) {
-      return {
-        label,
-        className: "bg-gradient-to-tr from-amber-400/25 to-amber-300/10 text-amber-100 border border-amber-300/30",
-        rowStyle: { boxShadow: `0 0 16px rgba(245,196,67,0.14)`, borderColor: `rgba(245,196,67,0.25)` },
-      };
-    }
-    if (dtDays <= 5 * 365.25) {
-      return {
-        label,
-        className: "bg-gradient-to-br from-accent/20 to-accent/5 text-accent border border-accent/30 shadow-[0_0_12px_rgba(110,203,255,0.2)]",
-        rowStyle: { boxShadow: `0 0 12px rgba(110,203,255,0.16)`, borderColor: `rgba(110,203,255,0.3)` },
-      };
-    }
-    return { label, className: "bg-[#1a2238]/40 border-[#344056]/40 text-foreground/80", rowStyle: undefined };
   }
 
   // tick every minute to keep countdowns fresh

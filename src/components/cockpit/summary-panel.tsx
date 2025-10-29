@@ -12,6 +12,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import Image from "next/image";
 import client from "@/lib/appwrite";
 import { TablesDB, Functions, Query } from "appwrite";
 import type { Models } from "appwrite";
@@ -20,7 +21,6 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Badge } from "@/components/ui/badge";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Card } from "@/components/ui/card";
 
 type CometRow = {
@@ -237,19 +237,25 @@ function InteractiveImage({ src, alt }: { src: string; alt?: string }) {
       onPointerCancel={endPointer}
       onDoubleClick={handleDoubleClick}
     >
-      <img
-        src={src}
-        alt={alt}
-        className="h-full w-full select-none object-contain"
+      <div
+        className="relative h-full w-full"
         style={{
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
           transformOrigin: "0 0",
           willChange: "transform",
           transition: isDraggingRef.current ? "none" : "transform 120ms ease-out",
         }}
-        loading="lazy"
-        draggable={false}
-      />
+      >
+        <Image
+          src={src}
+          alt={alt ?? ""}
+          fill
+          sizes="(min-width: 1024px) 50vw, 100vw"
+          className="select-none object-contain"
+          draggable={false}
+          unoptimized
+        />
+      </div>
       <div className="pointer-events-none absolute bottom-3 right-3 rounded-full bg-black/40 px-2 py-1 text-[10px] uppercase tracking-[0.3em] text-white/70">
         {transform.scale.toFixed(2)}x
       </div>
@@ -1096,7 +1102,6 @@ export function SummaryDetailsPanel({ className = "" }: { className?: string }) 
     selectedSummary,
     selectedWindow,
     statusMessage,
-    panelError,
     pendingWindowId,
     selectedWindowId,
   } = useSummaryPanelContext();
@@ -1107,7 +1112,6 @@ export function SummaryDetailsPanel({ className = "" }: { className?: string }) 
     ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(generatedDate)
     : null;
   const hasSummary = Boolean(selectedSummary);
-  const windowRange = selectedWindow ? `${formatYear(selectedWindow.from.year)} → ${formatYear(selectedWindow.to.year)}` : null;
   const modelLabel = selectedSummary?.llm_model_used ?? "Unknown";
 
   const fallbackSummary = selectedWindow
@@ -1126,14 +1130,13 @@ export function SummaryDetailsPanel({ className = "" }: { className?: string }) 
     isPending && !hasSummary
       ? [...normalizedSummaryParagraphs, pendingQuote]
       : normalizedSummaryParagraphs;
-
-  const statusBadge = isPending ? (
-    <Badge variant="secondary" className="flex items-center gap-2 self-start border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-100">
+  const statusIndicator = isPending ? (
+    <Badge variant="secondary" className="flex items-center gap-2 border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-100">
       <Spinner />
       Generating
     </Badge>
   ) : statusMessage ? (
-    <Badge variant="secondary" className="self-start border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-100">
+    <Badge variant="secondary" className="border-cyan-400/40 bg-cyan-500/15 px-3 py-1.5 text-xs text-cyan-100">
       {statusMessage}
     </Badge>
   ) : null;
@@ -1183,6 +1186,7 @@ export function SummaryDetailsPanel({ className = "" }: { className?: string }) 
         >
           {hasSummary ? modelLabel : "no generations yet"}
         </Badge>
+        {statusIndicator}
       </div>
     </div>
   );

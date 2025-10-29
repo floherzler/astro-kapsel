@@ -11,6 +11,8 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type ReactElement,
+  type HTMLAttributes,
 } from "react";
 
 function cx(...parts: Array<string | undefined | null | false>) {
@@ -56,9 +58,10 @@ export function Tooltip({
   const id = useId();
 
   useEffect(() => {
+    const timersRef = timers.current;
     return () => {
-      if (timers.current.open) clearTimeout(timers.current.open);
-      if (timers.current.close) clearTimeout(timers.current.close);
+      if (timersRef.open) clearTimeout(timersRef.open);
+      if (timersRef.close) clearTimeout(timersRef.close);
     };
   }, []);
 
@@ -115,11 +118,12 @@ export function TooltipTrigger({ children, className = "", asChild = false }: To
   };
 
   if (asChild && isValidElement(children)) {
-    return cloneElement(children, {
+    const child = children as ReactElement<{ className?: string; tabIndex?: number }>;
+    return cloneElement(child, {
       ...triggerProps,
-      className: cx(children.props.className, className),
-      tabIndex: children.props.tabIndex ?? 0,
-    });
+      className: cx(child.props.className, className),
+      tabIndex: child.props.tabIndex ?? 0,
+    } as HTMLAttributes<HTMLElement>);
   }
 
   return (

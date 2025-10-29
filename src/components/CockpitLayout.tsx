@@ -194,7 +194,6 @@ function MainView({ children }: { children?: ReactNode }) {
         s!.raf = undefined;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [muted]);
 
   return (

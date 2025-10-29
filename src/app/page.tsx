@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import Image from "next/image";
 import { useState } from "react";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import CometList from "@/components/comet-list";
@@ -32,18 +33,18 @@ export default function Home() {
             <span className="pointer-events-none absolute inset-0 animate-[pulse_5s_infinite] bg-[radial-gradient(circle_at_20%_120%,rgba(56,189,248,0.35),transparent_55%)] opacity-70" aria-hidden />
             <span className="pointer-events-none absolute left-[-25%] top-1/2 h-[3px] w-[55%] -translate-y-1/2 rounded-full bg-gradient-to-r from-transparent via-cyan-200/80 to-transparent opacity-0 transition-all duration-600 group-hover:left-[110%] group-hover:opacity-100" aria-hidden />
 
-            <span className="relative z-10 flex-1 flex items-center justify-center text-[10px] tracking-[0.55em] text-cyan-100/80">Enter</span>
+            <span className="relative z-10 flex flex-1 items-center justify-center text-[10px] tracking-[0.55em] text-cyan-100/80">Enter</span>
 
-            <span className="relative z-10 flex-1 flex items-center justify-center">
+            <span className="relative z-10 flex flex-1 items-center justify-center">
               <span className="relative flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/60 bg-black/30 shadow-[0_0_18px_rgba(59,130,246,0.45)]">
                 <span className="absolute h-14 w-14 -translate-x-1/4 rounded-full bg-cyan-400/20 blur-2xl" aria-hidden />
                 <span className="relative flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-rose-200/70 via-rose-500/80 to-orange-500/70 shadow-[0_0_18px_rgba(248,113,113,0.45)]">
-                  <img src="/icons/comet.svg" alt="Comet icon" className="h-5 w-5" />
+                  <Image src="/icons/comet.svg" alt="Comet icon" width={20} height={20} className="h-5 w-5 select-none" />
                 </span>
               </span>
             </span>
 
-            <span className="relative z-10 flex-1 flex items-center justify-center text-[10px] tracking-[0.55em] text-cyan-100/80">Cockpit</span>
+            <span className="relative z-10 flex flex-1 items-center justify-center text-[10px] tracking-[0.55em] text-cyan-100/80">Cockpit</span>
           </Link>
         </div>
 

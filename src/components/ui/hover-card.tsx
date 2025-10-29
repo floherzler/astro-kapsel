@@ -11,6 +11,8 @@ import {
   useState,
   type ReactNode,
   type CSSProperties,
+  type ReactElement,
+  type HTMLAttributes,
 } from "react";
 
 function cx(...parts: Array<string | undefined | null | false>) {
@@ -56,9 +58,10 @@ export function HoverCard({
   const timers = useRef<HoverIntentTimers>({});
 
   useEffect(() => {
+    const timersRef = timers.current;
     return () => {
-      if (timers.current.open) clearTimeout(timers.current.open);
-      if (timers.current.close) clearTimeout(timers.current.close);
+      if (timersRef.open) clearTimeout(timersRef.open);
+      if (timersRef.close) clearTimeout(timersRef.close);
     };
   }, []);
 
@@ -123,12 +126,13 @@ export function HoverCardTrigger({
   };
 
   if (asChild && isValidElement(children)) {
-    return cloneElement(children, {
+    const child = children as ReactElement<{ className?: string }>;
+    return cloneElement(child, {
       ...eventProps,
-      className: cx(children.props.className, className),
+      className: cx(child.props.className, className),
       "aria-expanded": open,
       "aria-haspopup": "dialog",
-    });
+    } as HTMLAttributes<HTMLElement>);
   }
 
   return (
