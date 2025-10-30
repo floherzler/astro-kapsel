@@ -1,3 +1,4 @@
+// addComet.ts (Deno / Appwrite Functions v7+)
 import { Client, TablesDB, ID, Query } from "npm:node-appwrite";
 
 type Body = { cometID?: string };
@@ -14,24 +15,57 @@ function extractNasaMessage(payload: any): string | null {
     return null;
 }
 
-/**
- * Hybrid classification using both prefix (naming) + orbit_class.code (dynamic orbit type)
- */
-function classifyComet(nasaObj: any) {
-    const prefix = nasaObj?.prefix?.toUpperCase() ?? null;
-    const orbitCode = nasaObj?.orbit_class?.code?.toUpperCase() ?? null;
+// ---- Robust body parser that works across Appwrite runtimes ----
+async function parseBody(req: any, log: (s: string) => void): Promise<Body> {
+    // 1) Appwrite v7 (preferred)
+    if (req?.bodyJson && typeof req.bodyJson === "object") {
+        log("[addComet] using req.bodyJson");
+        return req.bodyJson as Body;
+    }
+    if (typeof req?.bodyText === "string" && req.bodyText.length > 0) {
+        log("[addComet] parsing req.bodyText");
+        try { return JSON.parse(req.bodyText) as Body; } catch { /* ignore */ }
+    }
+    // 2) Legacy fallbacks sometimes present
+    if (typeof req?.payload === "string" && req.payload.length > 0) {
+        log("[addComet] parsing req.payload");
+        try { return JSON.parse(req.payload) as Body; } catch { /* ignore */ }
+    }
+    // 3) Some gateways pass JSON in req.body
+    if (typeof req?.body === "string" && req.body.length > 0) {
+        log("[addComet] parsing req.body");
+        try { return JSON.parse(req.body) as Body; } catch { /* ignore */ }
+    }
+    // 4) Query param fallback (?cometID=1P)
+    try {
+        const url = req?.url ?? req?.headers?.["x-original-url"];
+        if (typeof url === "string") {
+            const q = new URL(url).searchParams.get("cometID");
+            if (q) return { cometID: q };
+        }
+    } catch { /* ignore */ }
 
-    // Prefix overrides (naming meaning)
+    // 5) Nothing found
+    log("[addComet] no JSON body found");
+    return {};
+}
+
+/** Hybrid classification using prefix (naming) + orbit_class.code (dynamical class) */
+function classifyComet(nasaObj: any) {
+    const prefix = (nasaObj?.prefix ?? "").toString().toUpperCase() || null;
+    const orbitCode = (nasaObj?.orbit_class?.code ?? "").toString().toUpperCase() || null;
+
+    // Prefix overrides
     if (prefix === "D") return { prefix, status: "lost", is_viable: false };
     if (prefix === "X") return { prefix, status: "unreliable", is_viable: false };
     if (prefix === "A") return { prefix, status: "asteroid", is_viable: false };
     if (prefix === "I") return { prefix, status: "interstellar", is_viable: false };
 
-    // Physical orbit type classification
+    // Dynamical class
     switch (orbitCode) {
-        case "JFC": return { prefix, status: "periodic", is_viable: true };     // Jupiter-family comet
-        case "HTC": return { prefix, status: "periodic", is_viable: true };     // Halley-type comet
-        case "LPC": return { prefix, status: "long-period", is_viable: true };  // Long-period comet
+        case "JFC": return { prefix, status: "periodic", is_viable: true };     // Jupiter-family
+        case "HTC": return { prefix, status: "periodic", is_viable: true };     // Halley-type
+        case "LPC": return { prefix, status: "long-period", is_viable: true };  // Long-period
         case "HYP": return { prefix, status: "hyperbolic", is_viable: false };  // Non-returning
         case "MBA":
         case "AST": return { prefix, status: "asteroid", is_viable: false };
@@ -41,104 +75,138 @@ function classifyComet(nasaObj: any) {
 
 export default async ({ req, res, log, error }: any) => {
     try {
-        // --- Parse input ---
-        const body: Body = await req.json().catch(() => ({}));
-        if (!body?.cometID) return res.json({ error: "Missing cometID" }, 400);
+        // --- Parse input safely ---
+        const body = await parseBody(req, log);
+        if (!body?.cometID || typeof body.cometID !== "string") {
+            return res.json({ success: false, error: "Missing required field: cometID" }, 400);
+        }
         const cometID = body.cometID.trim();
-        log(`☄️ Fetching ${cometID}`);
+        log(`☄️ addComet: fetching "${cometID}"`);
 
         // --- Fetch from NASA SBDB ---
         const nasaUrl = `https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=${encodeURIComponent(cometID)}`;
         const response = await fetch(nasaUrl);
         const raw = await response.text();
-        const nasaData = JSON.parse(raw);
+        let nasaData: any;
+        try { nasaData = JSON.parse(raw); }
+        catch { return res.json({ success: false, error: "Invalid NASA response", details: raw }, 502); }
 
-        if (!response.ok || !nasaData?.object?.fullname) {
-            return res.json({ error: extractNasaMessage(nasaData) ?? "Not found" }, 404);
+        // Multiple candidates (HTTP 300 or 200 with list but no object)
+        if ((response.status === 300 || (nasaData?.list && !nasaData?.object)) && Array.isArray(nasaData.list)) {
+            const names = nasaData.list
+                .map((e: any) => e?.name || e?.pdes)
+                .filter(Boolean)
+                .join(", ");
+            return res.json({
+                success: false,
+                error: `Multiple matches for "${cometID}".`,
+                candidates: nasaData.list,
+                candidateNames: names
+            }, 409);
         }
 
-        // Extract orbital elements
-        const els = nasaData.orbit?.elements ?? [];
-        const val = (n: string) => parseFloat(els.find((e: any) => e.name === n)?.value ?? null);
+        if (!response.ok || !nasaData?.object?.fullname) {
+            return res.json({
+                success: false,
+                error: extractNasaMessage(nasaData) ?? `Not found for "${cometID}"`,
+                details: nasaData
+            }, response.status || 404);
+        }
 
-        // Hybrid classification
+        // --- Extract orbital elements ---
+        const els = nasaData.orbit?.elements ?? [];
+        const get = (n: string) => els.find((e: any) => e?.name === n)?.value ?? null;
+        const f = (n: string) => (get(n) !== null ? parseFloat(get(n)) : null);
+
+        // Classification
         const cls = classifyComet(nasaData.object);
 
         const summary = {
-            name: nasaData.object.fullname,
-            designation: nasaData.object.des,
-            prefix: cls.prefix,
-            comet_status: cls.status,
-            is_viable: cls.is_viable,
-            orbit_class: nasaData.object.orbit_class?.name ?? null,
+            name: nasaData.object.fullname ?? null,
+            designation: nasaData.object.des ?? null,
+
+            // NEW: names + flags for UI
+            prefix: cls.prefix,                                  // 'P','C','D','X','A','I' (from JPL)
+            comet_status: cls.status,                            // 'periodic','long-period','hyperbolic','lost','asteroid','interstellar','unreliable','unknown'
+            is_viable: cls.is_viable,                            // true for P/C with JFC/HTC/LPC
+
+            orbit_class_name: nasaData.object.orbit_class?.name ?? null,
             orbit_class_code: nasaData.object.orbit_class?.code ?? null,
-            eccentricity: val("e") || null,
-            semi_major_axis: val("a") || null,
-            perihelion_distance: val("q") || null,
-            period_years: val("per") ? val("per") / 365.25 : null,
-            last_perihelion_year: val("tp") || null,
-            inclination_deg: val("i") || null,
-            ascending_node_deg: val("om") || null,
-            arg_periapsis_deg: val("w") || null,
+
+            eccentricity: f("e"),
+            semi_major_axis: f("a"),
+            perihelion_distance: f("q"),
+            period_years: f("per") ? f("per")! / 365.25 : null,
+            last_perihelion_year: f("tp"),                       // JD (TDB)
+            inclination_deg: f("i"),
+            ascending_node_deg: f("om"),
+            arg_periapsis_deg: f("w"),
             source: nasaData.signature?.source ?? "NASA/JPL SBDB",
         };
 
-        // --- Appwrite setup ---
+        // --- Appwrite client ---
         const client = new Client()
             .setEndpoint(Deno.env.get("APPWRITE_FUNCTION_API_ENDPOINT")!)
-            .setProject(Deno.env.get("APPWRITE_FUNCTION_PROJECT_ID")!)
-            .setKey(req.headers["x-appwrite-key"] ?? Deno.env.get("APPWRITE_API_KEY")!);
+            .setProject(Deno.env.get("APPWRITE_FUNCTION_PROJECT_ID")!);
+
+        const apiKey =
+            req.headers?.["x-appwrite-key"] ??
+            Deno.env.get("APPWRITE_API_KEY") ??
+            Deno.env.get("APPWRITE_FUNCTION_API_KEY"); // extra fallback
+
+        if (apiKey) client.setKey(String(apiKey));
 
         const tablesDB = new TablesDB(client);
         const databaseId = Deno.env.get("APPWRITE_DATABASE_ID")!;
-        const comets = Deno.env.get("APPWRITE_TABLE_COMETS")!;
-        const flybys = Deno.env.get("APPWRITE_TABLE_FLYBYS")!;
+        const cometsTable = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
+        const flybysTable = Deno.env.get("APPWRITE_TABLE_FLYBYS") ?? "flybys";
 
-        // Prevent duplicates
+        // --- De-dup by designation ---
         const existing = await tablesDB.listRows({
             databaseId,
-            tableId: comets,
-            queries: [Query.equal("designation", summary.designation)],
+            tableId: cometsTable,
+            queries: [Query.equal("designation", summary.designation ?? "__none__")],
         });
-        if (existing.total > 0) return res.json({ message: "Already exists", comet: existing.rows[0] });
+        if (existing.total > 0) {
+            return res.json({ success: true, message: "Comet already exists", comet: existing.rows[0] }, 200);
+        }
 
-        // Insert comet
-        const newRow = await tablesDB.createRow({
+        // --- Insert comet row ---
+        const cometRow = await tablesDB.createRow({
             databaseId,
-            tableId: comets,
+            tableId: cometsTable,
             rowId: ID.unique(),
             data: summary,
         });
 
-        // Generate flybys only for viable repeat comets
-        if (summary.is_viable && summary.period_years && summary.last_perihelion_year) {
+        // --- Generate flybys only for viable returning comets (JFC/HTC/LPC) ---
+        const e = summary.eccentricity ?? NaN;
+        const canRepeat = summary.is_viable && Number.isFinite(e) && e < 1;
+
+        if (canRepeat && summary.period_years && summary.last_perihelion_year) {
             const jdToYear = (jd: number) => 2000 + (jd - 2451545.0) / 365.25;
             const lastYear = jdToYear(summary.last_perihelion_year);
             const period = summary.period_years;
 
-            const entries = [];
+            // 5 past + next one
             for (let n = -5; n <= 1; n++) {
-                entries.push({
-                    comet: newRow.$id,
-                    year: lastYear + n * period,
-                    flagged: false,
-                });
-            }
-
-            for (const f of entries) {
                 await tablesDB.createRow({
                     databaseId,
-                    tableId: flybys,
+                    tableId: flybysTable,
                     rowId: ID.unique(),
-                    data: f,
+                    data: {
+                        comet: cometRow.$id,
+                        year: lastYear + n * period,
+                        flagged: false,
+                    },
                 });
             }
         }
 
-        return res.json({ success: true, comet: newRow }, 201);
+        return res.json({ success: true, comet: cometRow }, 201);
 
     } catch (e: any) {
-        error(e);
-        return res.json({ error: "Internal server error", details: e?.message }, 500);
+        error(`[addComet] ${e?.message || e}`);
+        return res.json({ success: false, error: "Internal server error", details: String(e?.message || e) }, 500);
     }
 };
