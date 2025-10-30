@@ -130,7 +130,7 @@ export default async ({ req, res, log, error }: any) => {
             comet_status: cls.status,                            // 'periodic','long-period','hyperbolic','lost','asteroid','interstellar','unreliable','unknown'
             is_viable: cls.is_viable,                            // true for P/C with JFC/HTC/LPC
 
-            orbit_class_name: nasaData.object.orbit_class?.name ?? null,
+            orbit_class: nasaData.object.orbit_class?.name ?? null,
             orbit_class_code: nasaData.object.orbit_class?.code ?? null,
 
             eccentricity: f("e"),
