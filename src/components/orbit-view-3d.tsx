@@ -49,7 +49,7 @@ const ORBIT_STATUS_STYLES: Record<
   lost: {
     label: "Lost / Disrupted",
     color: "#8e8e8e",
-    opacity: 0.4,
+    opacity: 0.5,
     dash: { dash: 0.35, gap: 1.2 },
   },
   unreliable: {
@@ -63,12 +63,19 @@ const ORBIT_STATUS_STYLES: Record<
     color: "#ff966a",
     opacity: 0.75,
   },
+  hyperbolic: {
+    label: "Hyperbolic Trajectory",
+    color: "#d18bff",
+    opacity: 0.8,
+    glow: true,
+  },
   interstellar: {
     label: "Interstellar Object",
     color: "#b45eff",
     opacity: 0.85,
     glow: true,
     blend: "additive",
+    dash: { dash: 0.2, gap: 0.55 },
   },
   unknown: {
     label: "Unknown Classification",
@@ -77,11 +84,13 @@ const ORBIT_STATUS_STYLES: Record<
   },
 };
 
-function normalizeStatus(status?: string | null): StatusKey {
+function normalizeStatus(status?: string | null, isViable?: boolean | null): StatusKey {
+  if (isViable) return "viable";
   const key = (status ?? "").toLowerCase();
-  if (key === "viable") return "viable";
+  if (key === "periodic" || key === "long-period" || key === "viable") return "viable";
   if (key === "lost") return "lost";
   if (key === "unreliable") return "unreliable";
+  if (key === "hyperbolic" || key === "hyperbola") return "hyperbolic";
   if (key === "asteroid") return "asteroid";
   if (key === "interstellar") return "interstellar";
   return "unknown";
@@ -119,6 +128,7 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
   const [tooltip, setTooltip] = useState<null | { label: string; x: number; y: number }>(null);
   const [showPlanets, setShowPlanets] = useState(true);
   const [showKuiper, setShowKuiper] = useState(true);
+  const [showAsteroids, setShowAsteroids] = useState(false);
   const sunRef = useRef<THREE.Object3D | null>(null);
 
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
@@ -302,7 +312,8 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
     const idsSet = onlyIds && onlyIds.length > 0 ? new Set(onlyIds) : null;
     const valid = rows
       .filter((r) => (r.semi_major_axis ?? null) && (r.eccentricity ?? null))
-      .filter((r) => (idsSet ? idsSet.has(r.$id) : true));
+      .filter((r) => (idsSet ? idsSet.has(r.$id) : true))
+      .filter((r) => showAsteroids || normalizeStatus(r.comet_status, r.is_viable) !== "asteroid");
     const maxAComets = valid.reduce((m, r) => Math.max(m, r.semi_major_axis || 0), 1);
     const maxAPlanets = showPlanets ? 30.1 : 0; // up to Neptune's ~30 AU
     const maxAKuiper = showKuiper ? 50 : 0;
@@ -411,7 +422,7 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
       const iDeg = r.inclination_deg ?? 0; // if not available, keep in ecliptic plane
       const oDeg = r.ascending_node_deg ?? 0;
       const wDeg = r.arg_periapsis_deg ?? 0;
-      const statusKey = normalizeStatus(r.comet_status);
+      const statusKey = normalizeStatus(r.comet_status, r.is_viable);
       const style = ORBIT_STATUS_STYLES[statusKey];
       const color = new THREE.Color(style.color);
       const isViable = Boolean(r.is_viable);
@@ -544,7 +555,7 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
     scene.add(group);
     orbitsGroupRef.current = group;
     interactivesRef.current = interactives;
-  }, [rows, showPlanets, showKuiper, onlyIds, variant]);
+  }, [rows, showPlanets, showKuiper, showAsteroids, onlyIds, variant]);
 
   const controls = (
     <div className="flex items-center gap-3 text-xs text-foreground/80">
@@ -581,6 +592,13 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
           Highlights a ring of icy bodies at 30–50 AU so you can see which comets likely hail from the Kuiper Belt reservoir.
         </HoverCardContent>
       </HoverCard>
+
+      <Switch
+        label="Show Asteroids & Non-Comet Bodies"
+        checked={showAsteroids}
+        onCheckedChange={setShowAsteroids}
+        className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-slate-200/75"
+      />
     </div>
   );
 

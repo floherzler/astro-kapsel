@@ -12,6 +12,7 @@ import { Dropdown } from "@/components/ui/dropdown";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@/components/ui/hover-card";
 
 type CometRow = {
   $id: string;
@@ -26,49 +27,57 @@ type CometRow = {
   is_viable?: boolean | null;
 };
 
-type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "interstellar" | "unknown";
-type StatusFilterKey = "all" | "viable" | "lost" | "unreliable" | "interstellar" | "asteroid";
+type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "hyperbolic" | "interstellar" | "unknown";
+type StatusFilterKey = "all" | "viable" | "lost" | "asteroid" | "hyperbolic" | "interstellar";
 type PrefixKey = "P" | "C" | "D" | "X" | "A" | "I";
+type CometSuggestion = {
+  designation?: string | null;
+  name?: string | null;
+  suggestion_label: string;
+};
 
-const STATUS_CONFIG: Record<StatusKey, { label: string; className: string; description: string }> = {
-  viable: {
-    label: "Periodic / Returning",
-    className: "border border-cyan-400/40 bg-cyan-500/10 text-cyan-100",
-    description: "Active periodic comet with reliable returns.",
-  },
+const STATUS_CONFIG: Record<
+  Exclude<StatusKey, "viable">,
+  { label: string; className: string; description: string }
+> = {
   lost: {
-    label: "Lost / Disrupted",
-    className: "border border-dashed border-slate-500/50 bg-slate-800/40 text-slate-200/80",
-    description: "Object believed lost or disrupted; orbit no longer reliable.",
+    label: "LOST",
+    className: "border border-red-500/60 bg-red-500/10 text-red-200/90",
+    description: "Object believed lost or disrupted; orbit no longer observable.",
   },
   unreliable: {
-    label: "Uncertain Orbit",
-    className: "border border-amber-400/50 bg-amber-500/15 text-amber-100",
-    description: "Highly uncertain orbital elements or captures.",
+    label: "UNCERTAIN",
+    className: "border border-amber-400/60 bg-amber-500/10 text-amber-100",
+    description: "Highly uncertain orbital elements; treat predictions with caution.",
   },
   asteroid: {
-    label: "Not a Comet",
-    className: "border border-orange-400/60 bg-orange-500/15 text-orange-100",
-    description: "Reclassified as an asteroid or inactive body.",
+    label: "NOT A COMET",
+    className: "border border-slate-500/60 bg-slate-800/50 text-slate-200/90",
+    description: "Asteroidal object recorded for reference; not an active comet.",
+  },
+  hyperbolic: {
+    label: "HYPERBOLIC",
+    className: "border border-fuchsia-500/70 bg-fuchsia-500/15 text-fuchsia-100",
+    description: "Unbound trajectory; object will not return.",
   },
   interstellar: {
-    label: "Interstellar Object",
-    className: "border border-purple-400/60 bg-purple-500/20 text-purple-100",
-    description: "Unbound visitor on an interstellar trajectory.",
+    label: "INTERSTELLAR",
+    className: "border border-yellow-400/70 bg-yellow-500/15 text-yellow-100",
+    description: "Visitor from outside the solar system on a one-off passage.",
   },
   unknown: {
-    label: "Unknown Classification",
-    className: "border border-slate-600/50 bg-slate-900/40 text-slate-200/70",
+    label: "UNKNOWN",
+    className: "border border-slate-600/60 bg-slate-900/40 text-slate-200/80",
     description: "Status not yet classified.",
   },
 };
 
 const STATUS_FILTERS: Array<{ key: Exclude<StatusFilterKey, "all">; label: string; description: string }> = [
-  { key: "viable", label: "Viable Comets", description: "Only comets with active, returning orbits." },
-  { key: "lost", label: "Lost/Disrupted", description: "Objects with disrupted or missing orbits." },
-  { key: "unreliable", label: "Uncertain Orbit", description: "Comets with poorly constrained orbital elements." },
-  { key: "interstellar", label: "Interstellar Objects", description: "Visitors on hyperbolic, interstellar paths." },
-  { key: "asteroid", label: "Not Actually Comets", description: "Bodies reclassified as asteroids." },
+  { key: "viable", label: "Viable Comets", description: "Periodic or long-period comets with returning flybys." },
+  { key: "lost", label: "Lost", description: "Disintegrated or no longer trackable comets." },
+  { key: "asteroid", label: "Asteroid-like", description: "Asteroidal bodies catalogued for reference." },
+  { key: "hyperbolic", label: "Hyperbolic", description: "One-off visitors on unbound trajectories." },
+  { key: "interstellar", label: "Interstellar", description: "Objects entering from beyond the solar system." },
 ];
 
 const PREFIX_INFO: Record<PrefixKey, { title: string; description: string }> = {
@@ -80,18 +89,25 @@ const PREFIX_INFO: Record<PrefixKey, { title: string; description: string }> = {
   I: { title: "I", description: "Interstellar object on an unbound trajectory (I-class)." },
 };
 
+const VIABLE_TOOLTIP = {
+  title: "PERIODIC / RETURNING",
+  description: "Active comet with reliable returns. Flybys, summaries, and countdowns are available.",
+};
+
 const NON_VIABLE_COUNTDOWN = {
-  label: "No recurring perihelion cycle",
+  label: "—",
   className: "border-slate-700/60 bg-slate-900/40 text-foreground/60",
 };
 
-function normalizeStatus(status?: string | null): StatusKey {
+function normalizeStatus(status?: string | null, isViable?: boolean | null): StatusKey {
+  if (isViable) return "viable";
   const key = (status ?? "").toString().toLowerCase();
-  if (key === "viable") return "viable";
   if (key === "lost") return "lost";
   if (key === "unreliable") return "unreliable";
   if (key === "asteroid") return "asteroid";
+  if (key === "hyperbolic" || key === "hyperbola") return "hyperbolic";
   if (key === "interstellar") return "interstellar";
+  if (key === "periodic" || key === "long-period") return "viable";
   return "unknown";
 }
 
@@ -283,6 +299,8 @@ export default function CometList({
     []
   );
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
+  const [addNotice, setAddNotice] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<CometSuggestion[]>([]);
   // inline info replaces button
   // filters apply in realtime
   const [sortKey, setSortKey] = useState<"id" | "family" | "period" | "last" | "next" | "countdown">("countdown");
@@ -368,6 +386,7 @@ export default function CometList({
             return jd ?? Number.POSITIVE_INFINITY;
           }
           case "countdown": {
+            if (!r.is_viable) return Number.POSITIVE_INFINITY;
             const jd = nextPerihelionJD(r.last_perihelion_year ?? null, r.period_years ?? null);
             return jd ? jd - now : Number.POSITIVE_INFINITY;
           }
@@ -473,6 +492,7 @@ export default function CometList({
     setSubmitting(true);
     setSubmitMsg(null);
     setSubmitError(null);
+    setSuggestions([]);
     try {
       const functionId = "addComet";
       if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
@@ -480,6 +500,8 @@ export default function CometList({
       const exec = await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) });
       if (exec.status !== "completed") {
         setSubmitMsg(`Execution status: ${exec.status}`);
+        setSuggestions([]);
+        setAddNotice(null);
         setSubmitValue("");
         return;
       }
@@ -505,8 +527,11 @@ export default function CometList({
       const responseMessage = parsedError ?? parsedMessage ?? (!parsed && rawResponse ? rawResponse : undefined);
 
       if (typeof statusCode === "number" && Number.isFinite(statusCode) && statusCode >= 400) {
+        const multiMatch = parsed?.reason === "multiple_matches" && Array.isArray(parsed?.suggestions);
         setSubmitError(responseMessage ?? `Execution failed with status ${statusCode}`);
         setSubmitMsg(null);
+        setAddNotice(null);
+        setSuggestions(multiMatch ? (parsed!.suggestions as CometSuggestion[]) : []);
       } else {
         const successMsg =
           parsedMessage && parsedMessage.length > 0
@@ -515,10 +540,23 @@ export default function CometList({
         setSubmitMsg(successMsg);
         setBlast(true);
         setTimeout(() => setBlast(false), 1200);
+        setSuggestions([]);
+        const cometCandidate = parsed?.comet as Partial<CometRow> | undefined;
+        if (cometCandidate) {
+          if (cometCandidate.is_viable === false) {
+            setAddNotice("Note: This object is catalogued, but is not a returning comet. Visualizations and summaries are limited.");
+          } else {
+            setAddNotice(null);
+          }
+        } else {
+          setAddNotice(null);
+        }
       }
       setSubmitValue("");
     } catch (err: unknown) {
       setSubmitError(String((err as Error)?.message ?? err));
+      setAddNotice(null);
+      setSuggestions([]);
     } finally {
       setSubmitting(false);
     }
@@ -554,8 +592,8 @@ export default function CometList({
   const renderedList = (items: CometRow[]) => (
     <Accordion className="space-y-2">
       {items.map((c) => {
-        const statusKey = normalizeStatus(c.comet_status);
-        const statusConfig = STATUS_CONFIG[statusKey];
+        const statusKey = normalizeStatus(c.comet_status, c.is_viable);
+        const statusConfig = statusKey === "viable" ? null : STATUS_CONFIG[statusKey];
         const info = lastNextPerihelion(c.last_perihelion_year ?? null, c.period_years ?? null);
         const isViable = Boolean(c.is_viable);
         const nextJD = isViable ? nextPerihelionJD(c.last_perihelion_year ?? null, c.period_years ?? null) : null;
@@ -567,6 +605,15 @@ export default function CometList({
         const detailFooter = isViable
           ? "> telemetry slot reserved for future flyby data"
           : "> flybys disabled — classification is non-viable";
+        const badgeLabel = statusKey === "viable" ? "Countdown" : "Classification";
+        const badgeTitle = statusKey === "viable" ? VIABLE_TOOLTIP.title : statusConfig?.label ?? "UNKNOWN";
+        const badgeDescription =
+          statusKey === "viable" ? VIABLE_TOOLTIP.description : statusConfig?.description ?? "Classification unavailable.";
+        const badgeClassName =
+          statusKey === "viable"
+            ? `border ${countdown.className}`
+            : statusConfig?.className ?? "border border-slate-600/60 bg-slate-900/40 text-slate-200/80";
+        const badgeValue = statusKey === "viable" ? countdown.label : statusConfig?.label ?? "UNKNOWN";
         const header = (open: boolean) => (
           <div className={`group rounded-md border border-transparent bg-[#0b1020]/60 hover:bg-[#0b1020]/80 transition-colors`} style={rowStyle}>
             <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -593,12 +640,6 @@ export default function CometList({
                       </Tooltip>
                     ) : null}
                     <span className="min-w-0 truncate font-medium">{displayName}</span>
-                    <span
-                      className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] ${statusConfig.className}`}
-                      title={statusConfig.description}
-                    >
-                      {statusConfig.label}
-                    </span>
                   </div>
                   <div className="mt-1 text-[11px] text-foreground/60">
                     {typeof c.period_years === "number" ? `Period ≈ ${c.period_years.toFixed(2)}y` : "Period unknown"}
@@ -606,10 +647,25 @@ export default function CometList({
                 </div>
               </div>
               <div className="flex items-center gap-2 text-right">
-                <span className="text-xs text-foreground/60">Countdown</span>
-                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs border ${countdown.className}`}>
-                  {countdown.label}
-                </span>
+                <span className="text-xs text-foreground/60">{badgeLabel}</span>
+                <HoverCard>
+                  <HoverCardTrigger className="inline-flex">
+                    <span className={`inline-flex items-center rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.3em] ${badgeClassName}`}>
+                      {badgeValue}
+                    </span>
+                  </HoverCardTrigger>
+                  <HoverCardContent
+                    align="end"
+                    sideOffset={10}
+                    className="max-w-xs border border-white/10 bg-slate-950/95 px-3 py-2 text-[12px] leading-relaxed text-foreground/80 shadow-[0_22px_55px_-35px_rgba(110,203,255,0.65)]"
+                  >
+                    <div className="text-[10px] uppercase tracking-[0.35em] text-cyan-200/80">{badgeTitle}</div>
+                    <div className="mt-1 text-sm text-foreground/85">{badgeDescription}</div>
+                    {statusKey === "viable" && detailNext !== "—" ? (
+                      <div className="mt-2 text-xs text-cyan-200/75">Next perihelion: {detailNext}</div>
+                    ) : null}
+                  </HoverCardContent>
+                </HoverCard>
               </div>
             </div>
           </div>
@@ -678,7 +734,7 @@ export default function CometList({
           <div className={`mt-3 space-y-3 sm:mt-2 sm:space-y-0 ${filtersExpanded ? "block" : "hidden"} sm:block`}>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md border border-white/10 bg-white/5 p-3">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300/70">Comet classes</div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300/70">Object type</div>
                 <div className="mt-2">
                   <div className="flex items-center gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
                     <button
@@ -769,9 +825,39 @@ export default function CometList({
             {submitMsg}
           </div>
         )}
+        {addNotice && (
+          <div className="-mt-2 mb-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.15)]">
+            {addNotice}
+          </div>
+        )}
         {submitError && (
           <div className="-mt-1 mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-200 shadow-[0_0_20px_rgba(239,68,68,0.15)]">
             {submitError}
+          </div>
+        )}
+        {suggestions.length > 0 && (
+          <div className="-mt-1 mb-3 rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-3 text-sm text-cyan-50/90 shadow-[0_0_20px_rgba(14,165,233,0.18)]">
+            <p className="mb-2 text-xs uppercase tracking-[0.3em] text-cyan-100/80">Multiple matches found</p>
+            <div className="flex flex-col gap-2">
+              {suggestions.map((s, idx) => (
+                <button
+                  key={`${s.designation ?? s.name ?? idx}`}
+                  type="button"
+                  onClick={() => {
+                    setSubmitValue(s.designation || s.name || "");
+                    setSuggestions([]);
+                  }}
+                  className="flex w-full flex-col items-start rounded-md border border-cyan-400/30 bg-black/20 px-3 py-2 text-left text-sm transition hover:border-cyan-300/60 hover:bg-black/30"
+                >
+                  <span className="font-medium text-cyan-100">{s.suggestion_label}</span>
+                  {(s.designation && s.designation !== s.suggestion_label) || (s.name && s.name !== s.suggestion_label) ? (
+                    <span className="text-xs text-cyan-100/70">
+                      {[s.name, s.designation].filter((val) => val && val !== s.suggestion_label).join(" · ")}
+                    </span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {loading && <p className="text-sm text-foreground/70">Loading comets…</p>}

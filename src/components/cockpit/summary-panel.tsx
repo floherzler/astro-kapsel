@@ -22,6 +22,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 type CometRow = {
   $id: string;
@@ -353,8 +354,11 @@ function getExecutionOutput(execution: Models.Execution): string | null {
 
 type SummaryPanelContextValue = {
   comets: CometRow[];
+  viableComets: CometRow[];
   selectedCometId: string;
   setSelectedCometId: (id: string) => void;
+  selectedComet: CometRow | null;
+  isSelectedCometViable: boolean;
   flybyWindows: FlybyWindow[];
   summaryByWindow: Map<string, SummaryRecord>;
   selectedWindowId: string;
@@ -411,10 +415,12 @@ function useSummaryPanelState(): SummaryPanelContextValue {
         const labelB = formatCometLabel(b).toLowerCase();
         return labelA.localeCompare(labelB);
       });
+      const firstViable = rows.find((row) => row.is_viable);
       setComets(rows);
-      if (rows.length > 0) {
-        setSelectedCometId((prev) => prev || rows[0].$id);
-      }
+      setSelectedCometId((prev) => {
+        if (prev && rows.some((row) => row.$id === prev && row.is_viable)) return prev;
+        return firstViable?.$id ?? "";
+      });
     } catch (err) {
       setPanelError(`Failed to load comets: ${String((err as Error)?.message ?? err)}`);
     }
@@ -423,6 +429,13 @@ function useSummaryPanelState(): SummaryPanelContextValue {
   useEffect(() => {
     loadComets();
   }, [loadComets]);
+
+  const viableComets = useMemo(() => comets.filter((row) => row.is_viable), [comets]);
+
+  const selectedCometRow = useMemo(
+    () => (selectedCometId ? comets.find((row) => row.$id === selectedCometId) ?? null : null),
+    [comets, selectedCometId]
+  );
 
   const loadCometData = useCallback(
     async (cometId: string) => {
@@ -536,9 +549,25 @@ function useSummaryPanelState(): SummaryPanelContextValue {
   );
 
   useEffect(() => {
-    if (!selectedCometId) return;
+    if (!selectedCometId) {
+      setFlybyWindows([]);
+      setSummaryByWindow(new Map());
+      setSelectedWindowId("");
+      setStatusMessage(null);
+      setLoading(false);
+      return;
+    }
+    const row = comets.find((item) => item.$id === selectedCometId);
+    if (!row?.is_viable) {
+      setFlybyWindows([]);
+      setSummaryByWindow(new Map());
+      setSelectedWindowId("");
+      setStatusMessage(null);
+      setLoading(false);
+      return;
+    }
     loadCometData(selectedCometId);
-  }, [selectedCometId, loadCometData]);
+  }, [selectedCometId, loadCometData, comets]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -712,9 +741,12 @@ function useSummaryPanelState(): SummaryPanelContextValue {
   return useMemo(
     () => ({
       comets,
+      viableComets,
       selectedCometId,
       setSelectedCometId,
       flybyWindows,
+      selectedComet: selectedCometRow,
+      isSelectedCometViable: Boolean(selectedCometRow?.is_viable),
       summaryByWindow,
       selectedWindowId,
       setSelectedWindowId,
@@ -730,8 +762,10 @@ function useSummaryPanelState(): SummaryPanelContextValue {
     }),
     [
       comets,
+      viableComets,
       selectedCometId,
       flybyWindows,
+      selectedCometRow,
       summaryByWindow,
       selectedWindowId,
       selectedSummary,
@@ -783,9 +817,10 @@ export function useSummaryLayoutInfo() {
 
 export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
   const {
-    comets,
+    viableComets,
     selectedCometId,
     setSelectedCometId,
+    isSelectedCometViable,
     flybyWindows,
     summaryByWindow,
     selectedWindowId,
@@ -797,11 +832,7 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     clearStatus,
   } = useSummaryPanelContext();
 
-  const selectedComet = useMemo(
-    () => comets.find((row) => row.$id === selectedCometId) ?? null,
-    [comets, selectedCometId]
-  );
-  const isSelectedViable = Boolean(selectedComet?.is_viable);
+  const isSelectedViable = isSelectedCometViable;
 
   const falAudioRef = useRef<HTMLAudioElement | null>(null);
   const falAudioCleanupRef = useRef<(() => void) | null>(null);
@@ -998,27 +1029,32 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
   const deltaRounded = Math.round(delta);
 
   if (!activeWindow) {
+    const fallbackMessage = loading
+      ? "Loading…"
+      : isSelectedViable
+        ? "No flybys found for this comet."
+        : "This object does not have periodic returns, so no flyby timeline is generated.";
     return (
       <Card
         className={`aspect-square w-full flex min-h-0 flex-col overflow-visible rounded-2xl border border-slate-800/60 bg-gradient-to-b from-slate-950/85 via-slate-950/70 to-slate-950/85 text-xs text-slate-200/85 cockpit-panel-glow ${className}`}
       >
         <div className="flex h-full flex-col items-center justify-center gap-6 px-4 py-6 text-center">
-          <Dropdown
-            value={selectedCometId}
-            onChange={(value) => {
-              setSelectedCometId(value);
-              clearStatus();
-            }}
-            items={
-              comets.length > 0
-                ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
-                : [{ value: "", label: "No comets available" }]
-            }
-            className="w-full max-w-xs text-center"
-          />
-          <div className="text-[12px] text-slate-300/80">
-            {loading ? "Loading…" : "No flybys found for this comet."}
+          <div className="relative z-20 w-full max-w-xs">
+            <Dropdown
+              value={selectedCometId}
+              onChange={(value) => {
+                setSelectedCometId(value);
+                clearStatus();
+              }}
+              items={
+                viableComets.length > 0
+                  ? viableComets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
+                  : [{ value: "", label: "No periodic comets available" }]
+              }
+              className="w-full text-center"
+            />
           </div>
+          <div className="text-[12px] text-slate-300/80">{fallbackMessage}</div>
         </div>
       </Card>
     );
@@ -1029,6 +1065,42 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
   const otherWindowPending = Boolean(pendingWindowId) && pendingWindowId !== activeWindow.id;
   const buttonDisabled = generationBlocked || hasSummary || otherWindowPending;
   const shouldPulse = !generationBlocked && !hasSummary && !isPending;
+  const generateButton = (
+    <Button
+      size="sm"
+      variant="space"
+      onClick={() => handleGenerate(activeWindow)}
+      disabled={buttonDisabled}
+      className={`w-full justify-center ${
+        hasSummary
+          ? "cursor-default border-cyan-400/25 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/15"
+          : generationBlocked
+            ? "cursor-not-allowed border-slate-700/60 bg-slate-900/40 text-slate-300/70"
+            : shouldPulse
+              ? "animate-pulse"
+              : ""
+      }`}
+      style={shouldPulse ? { animationDuration: "2.4s" } : undefined}
+    >
+      {hasSummary ? (
+        <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
+          Briefing ready
+        </span>
+      ) : generationBlocked ? (
+        <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-slate-300/75 sm:text-[12px]">
+          No recurring perihelion cycle
+        </span>
+      ) : isPending ? (
+        <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/80 sm:text-[12px]">
+          <Spinner /> Contacting FAL…
+        </span>
+      ) : (
+        <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
+          Generate with FAL
+        </span>
+      )}
+    </Button>
+  );
 
   return (
     <Card
@@ -1041,20 +1113,22 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
       ) : null}
 
       <div className="grid h-full grid-rows-7 items-center justify-items-center gap-3 px-4 py-6 sm:gap-4 sm:px-6 sm:py-8">
-        <div className="flex w-full max-w-xs flex-col items-center justify-center gap-2 sm:max-w-sm">
-          <Dropdown
-            value={selectedCometId}
-            onChange={(value) => {
-              setSelectedCometId(value);
-              clearStatus();
-            }}
-            items={
-              comets.length > 0
-                ? comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
-                : [{ value: "", label: "No comets available" }]
-            }
-            className="w-full min-w-0 text-center"
-          />
+        <div className="flex w-full flex-col items-center justify-center gap-2">
+          <div className="relative z-20 w-full max-w-xs">
+            <Dropdown
+              value={selectedCometId}
+              onChange={(value) => {
+                setSelectedCometId(value);
+                clearStatus();
+              }}
+              items={
+                viableComets.length > 0
+                  ? viableComets.map((row) => ({ value: row.$id, label: formatCometLabel(row) }))
+                  : [{ value: "", label: "No periodic comets available" }]
+              }
+              className="w-full text-center"
+            />
+          </div>
         </div>
 
         <div className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/75">
@@ -1132,72 +1206,54 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
         </div>
 
         <div className="flex w-full max-w-[18rem] justify-center sm:max-w-[20rem]">
-          <Button
-            size="sm"
-            variant="space"
-            onClick={() => handleGenerate(activeWindow)}
-            disabled={buttonDisabled}
-            className={`w-full justify-center ${
-              hasSummary
-                ? "cursor-default border-cyan-400/25 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/15"
-                : generationBlocked
-                  ? "cursor-not-allowed border-slate-700/60 bg-slate-900/40 text-slate-300/70"
-                  : shouldPulse
-                    ? "animate-pulse"
-                    : ""
-            }`}
-            style={shouldPulse ? { animationDuration: "2.4s" } : undefined}
-          >
-            {hasSummary ? (
-              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
-                Briefing ready
-              </span>
-            ) : generationBlocked ? (
-              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-slate-300/75 sm:text-[12px]">
-                No recurring perihelion cycle
-              </span>
-            ) : isPending ? (
-              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/80 sm:text-[12px]">
-                <Spinner /> Contacting FAL…
-              </span>
-            ) : (
-              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
-                Generate with FAL
-              </span>
-            )}
-          </Button>
+          {generationBlocked ? (
+            <Tooltip>
+              <TooltipTrigger asChild>{generateButton}</TooltipTrigger>
+              <TooltipContent className="max-w-xs border border-slate-700/60 bg-slate-900/95 px-3 py-2 text-[12px] text-slate-200/85 shadow-[0_18px_45px_-38px_rgba(59,130,246,0.45)]">
+                Summaries are only generated for periodic or returning comets.
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            generateButton
+          )}
         </div>
 
-        <div className="flex w-full items-center justify-center">
-          <div className="flex items-center gap-3">
-            {flybyWindows.map((win, dotIndex) => {
-              const hasSummary = summaryByWindow.has(win.id);
-              const dotSelected = selectedWindowId === win.id;
-              const glowClasses = hasSummary
-                ? "bg-emerald-400/80 shadow-[0_0_14px_rgba(52,211,153,0.6)]"
-                : "bg-slate-500/60 shadow-[0_0_10px_rgba(148,163,184,0.35)]";
-              return (
-                <button
-                  key={win.id}
-                  type="button"
-                  onClick={() => {
-                    if (selectedWindowId !== win.id) {
-                      setSelectedWindowId(win.id);
-                      clearStatus();
-                    }
-                  }}
-                  className={`group relative flex h-6 w-6 items-center justify-center rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 ${dotSelected ? "ring-2 ring-cyan-300/70" : "ring-0 hover:scale-110"}`}
-                  aria-label={`Select window ${dotIndex + 1}${hasSummary ? " – briefing ready" : " – no briefing yet"}`}
-                >
-                  <span
-                    className={`block h-2.5 w-2.5 rounded-full transition-all duration-200 ${glowClasses} ${dotSelected ? "scale-125" : "opacity-70 group-hover:opacity-100"
-                      }`}
-                  />
-                </button>
-              );
-            })}
+        {generationBlocked ? (
+          <div className="text-center text-[11px] text-slate-300/75">
+            This object does not have periodic returns, so no flyby timeline is generated.
           </div>
-        </div>
+        ) : (
+          <div className="flex w-full items-center justify-center">
+            <div className="flex items-center gap-3">
+              {flybyWindows.map((win, dotIndex) => {
+                const hasSummary = summaryByWindow.has(win.id);
+                const dotSelected = selectedWindowId === win.id;
+                const glowClasses = hasSummary
+                  ? "bg-emerald-400/80 shadow-[0_0_14px_rgba(52,211,153,0.6)]"
+                  : "bg-slate-500/60 shadow-[0_0_10px_rgba(148,163,184,0.35)]";
+                return (
+                  <button
+                    key={win.id}
+                    type="button"
+                    onClick={() => {
+                      if (selectedWindowId !== win.id) {
+                        setSelectedWindowId(win.id);
+                        clearStatus();
+                      }
+                    }}
+                    className={`group relative flex h-6 w-6 items-center justify-center rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/70 ${dotSelected ? "ring-2 ring-cyan-300/70" : "ring-0 hover:scale-110"}`}
+                    aria-label={`Select window ${dotIndex + 1}${hasSummary ? " – briefing ready" : " – no briefing yet"}`}
+                  >
+                    <span
+                      className={`block h-2.5 w-2.5 rounded-full transition-all duration-200 ${glowClasses} ${dotSelected ? "scale-125" : "opacity-70 group-hover:opacity-100"
+                        }`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
@@ -1299,7 +1355,12 @@ export function SummaryDetailsPanel({ className = "" }: { className?: string }) 
 }
 
 export function SummaryVisualizationPanel({ className = "" }: { className?: string }) {
-  const { selectedSummary, selectedWindow } = useSummaryPanelContext();
+  const { selectedSummary, selectedWindow, isSelectedCometViable } = useSummaryPanelContext();
+  const visualizationMessage = isSelectedCometViable
+    ? selectedWindow
+      ? "Generate the visualization for the selected window."
+      : "Select a flyby window and request a visualization."
+    : "Visualizations are only generated for periodic or returning comets.";
 
   return (
     <div className={`flex h-full w-full flex-col justify-between ${className}`}>
@@ -1315,11 +1376,7 @@ export function SummaryVisualizationPanel({ className = "" }: { className?: stri
               <span className="text-[11px] uppercase tracking-[0.35em] text-cyan-200/70">
                 Visualization pending
               </span>
-              <p className="text-sm text-slate-300/80">
-                {selectedWindow
-                  ? "Generate the visualization for the selected window."
-                  : "Select a flyby window and request a visualization."}
-              </p>
+              <p className="text-sm text-slate-300/80">{visualizationMessage}</p>
             </div>
           </div>
         )}
