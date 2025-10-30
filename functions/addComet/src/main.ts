@@ -93,15 +93,17 @@ export default async ({ req, res, log, error }: any) => {
 
         // Multiple candidates (HTTP 300 or 200 with list but no object)
         if ((response.status === 300 || (nasaData?.list && !nasaData?.object)) && Array.isArray(nasaData.list)) {
-            const names = nasaData.list
-                .map((e: any) => e?.name || e?.pdes)
-                .filter(Boolean)
-                .join(", ");
             return res.json({
                 success: false,
-                error: `Multiple matches for "${cometID}".`,
-                candidates: nasaData.list,
-                candidateNames: names
+                reason: "multiple_matches",
+                message: `Multiple matches found for "${cometID}".`,
+                suggestions: nasaData.list.map((e: any) => ({
+                    designation: e?.pdes ?? null,
+                    name: e?.name ?? null,
+                    suggestion_label: e?.name && e?.pdes ? `${e.name} (${e.pdes})` :
+                        e?.name ? e.name :
+                            e?.pdes ?? "Unknown object"
+                }))
             }, 409);
         }
 
