@@ -22,6 +22,9 @@ type CometRow = {
   inclination_deg?: number | null; // i (deg)
   ascending_node_deg?: number | null; // Ω (deg)
   arg_periapsis_deg?: number | null; // ω (deg)
+  prefix?: string | null;
+  comet_status?: string | null;
+  is_viable?: boolean | null;
 };
 
 function jdNow(): number {

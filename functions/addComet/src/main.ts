@@ -23,6 +23,37 @@ function extractNasaMessage(payload: any): string | null {
     return null;
 }
 
+function classifyComet(designation: string | null) {
+    if (!designation) {
+        return { prefix: null, comet_status: "unknown", is_viable: false };
+    }
+
+    const prefix = designation.split("/")[0]; // e.g. "1P", "C", "D", "I", etc.
+    const first = prefix.replace(/[0-9]/g, "").toUpperCase(); // normalize, remove numbers
+
+    switch (first) {
+        case "P": // periodic (<200y or confirmed multiple perihelia)
+        case "C": // long-period but real comet
+            return { prefix: first, comet_status: "viable", is_viable: true };
+
+        case "D": // lost / split / no longer exists
+            return { prefix: first, comet_status: "lost", is_viable: false };
+
+        case "X": // uncertain orbit — do NOT generate flybys
+            return { prefix: first, comet_status: "unreliable", is_viable: false };
+
+        case "A": // not a comet (asteroid on comet-like orbit)
+            return { prefix: first, comet_status: "asteroid", is_viable: false };
+
+        case "I": // interstellar object
+            return { prefix: first, comet_status: "interstellar", is_viable: false };
+
+        default:
+            return { prefix: first ?? null, comet_status: "unknown", is_viable: false };
+    }
+}
+
+
 function ok(res: any, data: unknown, status = 200) {
     return res.json(data, status);
 }
@@ -33,13 +64,13 @@ function fail(res: any, msg: string, status = 400, extra: Record<string, unknown
 function buildCandidateMessage(cometID: string, list: any[]) {
     const names = Array.isArray(list)
         ? list
-              .map((entry: any) => {
-                  const pdes = typeof entry?.pdes === "string" ? entry.pdes : null;
-                  const name = typeof entry?.name === "string" ? entry.name : null;
-                  if (pdes && name) return `${name} (${pdes})`;
-                  return pdes ?? name ?? null;
-              })
-              .filter(Boolean)
+            .map((entry: any) => {
+                const pdes = typeof entry?.pdes === "string" ? entry.pdes : null;
+                const name = typeof entry?.name === "string" ? entry.name : null;
+                if (pdes && name) return `${name} (${pdes})`;
+                return pdes ?? name ?? null;
+            })
+            .filter(Boolean)
         : [];
     const joined = names.join(", ");
     const message =
@@ -153,7 +184,7 @@ export default async ({ req, res, log, error }: any) => {
         const els = nasaData.orbit?.elements ?? [];
         const val = (n: string) => els.find((e: any) => e.name === n)?.value ?? null;
 
-        const summary = {
+        const base = {
             name: nasaData.object.fullname ?? null,
             designation: nasaData.object.des ?? null,
             orbit_class: nasaData.object.orbit_class?.name ?? null,
@@ -167,6 +198,15 @@ export default async ({ req, res, log, error }: any) => {
             ascending_node_deg: val("om") ? parseFloat(val("om")) : null,
             arg_periapsis_deg: val("w") ? parseFloat(val("w")) : null,
             source: nasaData.signature?.source ?? "NASA/JPL SBDB",
+        };
+
+        const { prefix, comet_status, is_viable } = classifyComet(nasaData.object.des ?? null);
+
+        const summary = {
+            ...base,
+            prefix,
+            comet_status,
+            is_viable,
         };
 
         // --- Connect to Appwrite ---
@@ -232,14 +272,14 @@ export default async ({ req, res, log, error }: any) => {
 
         log(`[addComet] Successfully added comet ${summary.name} to Appwrite ✅`);
 
-        // --- After comet insertion ---
-        if (newRow && summary.period_years && summary.last_perihelion_year) {
+        // Only generate flybys for real comets
+        if (newRow && summary.is_viable && summary.period_years && summary.last_perihelion_year != null) {
             try {
                 const period = summary.period_years;
                 const jd = summary.last_perihelion_year;
 
                 // Convert Julian Date → approximate decimal year
-                const jdToYear = (jd: number) => (jd - 2451545) / 365.25 + 2000; // JD 2451545 = 2000-01-01
+                const jdToYear = (jd: number) => 2000 + (jd - 2451545.0) / 365.25;
 
                 const lastYear = jdToYear(jd);
                 const flybys = [];
