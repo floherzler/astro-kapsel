@@ -27,7 +27,7 @@ type CometRow = {
   is_viable?: boolean | null;
 };
 
-type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "interstellar" | "unknown";
+type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "hyperbolic" | "interstellar" | "unknown";
 
 const ORBIT_STATUS_STYLES: Record<
   StatusKey,
