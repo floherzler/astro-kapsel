@@ -116,10 +116,7 @@ export default function GreatCometsPage() {
   const tableComets = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || process.env.APPWRITE_TABLE_COMETS || "comets";
   const tableFlybys = process.env.NEXT_PUBLIC_APPWRITE_TABLE_FLYBYS || process.env.APPWRITE_TABLE_FLYBYS || "flybys";
   const tableSightings = process.env.NEXT_PUBLIC_APPWRITE_TABLE_SIGHTINGS || process.env.APPWRITE_TABLE_SIGHTINGS || "sightings";
-  const functionId =
-    process.env.NEXT_PUBLIC_APPWRITE_GENERATE_SIGHTING ||
-    process.env.APPWRITE_GENERATE_SIGHTING ||
-    "generateSighting";
+  const functionId = "generateSighting";
 
   const [comets, setComets] = useState<CometRow[]>([]);
   const [cometsLoading, setCometsLoading] = useState(true);

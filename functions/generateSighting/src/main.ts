@@ -194,14 +194,18 @@ async function generateText(prompt: string, model: string = DEFAULT_TEXT_MODEL) 
     return { note: text, requestId: job.requestId, model };
 }
 
+function castDocument<T>(row: unknown): T {
+    return row as unknown as T;
+}
+
 async function getComet(ctx: HandlerContext, tables: TablesDB, params: { databaseId: string; tableId: string; cometId: string }) {
     const { databaseId, tableId, cometId } = params;
-    const comet = (await tables.getRow({
+    const comet = castDocument<CometRow>(await tables.getRow({
         databaseId,
         tableId,
         rowId: cometId,
         queries: [Query.select(["$id", "name", "designation", "prefix", "comet_status"])],
-    })) as CometRow;
+    }));
     if (!comet || !comet.$id) {
         ctx.log(`[generateSighting] comet not found: ${cometId}`);
         return null;
@@ -211,12 +215,12 @@ async function getComet(ctx: HandlerContext, tables: TablesDB, params: { databas
 
 async function getFlyby(ctx: HandlerContext, tables: TablesDB, params: { databaseId: string; tableId: string; flybyId: string }) {
     const { databaseId, tableId, flybyId } = params;
-    const flyby = (await tables.getRow({
+    const flyby = castDocument<FlybyRow>(await tables.getRow({
         databaseId,
         tableId,
         rowId: flybyId,
         queries: [Query.select(["$id", "year", "comet.$id"])],
-    })) as FlybyRow;
+    }));
     if (!flyby || !flyby.$id) {
         ctx.log(`[generateSighting] flyby not found: ${flybyId}`);
         return null;
@@ -356,7 +360,8 @@ export default async function handler(ctx: HandlerContext) {
             );
         }
 
-        ensureFalClientConfigured(process.env.FAL_API_KEY);
+        const falApiKey = process.env.FAL_API_KEY;
+        ensureFalClientConfigured(falApiKey!);
 
         const prompt = buildPrompt({
             cometName: comet.name ?? comet.$id ?? "Great Comet",
@@ -369,16 +374,21 @@ export default async function handler(ctx: HandlerContext) {
 
         const { note, requestId, model } = await generateText(prompt);
 
-        const sighting = (await tables.createRow({
+        const flybyIdValue = flyby.$id;
+        if (!flybyIdValue) {
+            return res.json({ ok: false, error: "Flyby row missing identifier." }, 500);
+        }
+
+        const sighting = castDocument<SightingRow>(await tables.createRow({
             databaseId,
             tableId: tableSightings,
             rowId: ID.unique(),
             data: {
-                flyby: flyby.$id,
+                flyby: flybyIdValue,
                 observer_name: observerName,
                 note,
-            },
-        })) as SightingRow;
+            } as Record<string, unknown>,
+        }));
 
         return res.json(
             {
