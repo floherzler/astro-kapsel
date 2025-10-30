@@ -11,6 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 
 type CometRow = {
   $id: string;
@@ -20,7 +21,85 @@ type CometRow = {
   period_years?: number | null;
   last_perihelion_year?: number | null;
   source?: string | null;
+  prefix?: string | null;
+  comet_status?: string | null;
+  is_viable?: boolean | null;
 };
+
+type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "interstellar" | "unknown";
+type StatusFilterKey = "all" | "viable" | "lost" | "unreliable" | "interstellar" | "asteroid";
+type PrefixKey = "P" | "C" | "D" | "X" | "A" | "I";
+
+const STATUS_CONFIG: Record<StatusKey, { label: string; className: string; description: string }> = {
+  viable: {
+    label: "Periodic / Returning",
+    className: "border border-cyan-400/40 bg-cyan-500/10 text-cyan-100",
+    description: "Active periodic comet with reliable returns.",
+  },
+  lost: {
+    label: "Lost / Disrupted",
+    className: "border border-dashed border-slate-500/50 bg-slate-800/40 text-slate-200/80",
+    description: "Object believed lost or disrupted; orbit no longer reliable.",
+  },
+  unreliable: {
+    label: "Uncertain Orbit",
+    className: "border border-amber-400/50 bg-amber-500/15 text-amber-100",
+    description: "Highly uncertain orbital elements or captures.",
+  },
+  asteroid: {
+    label: "Not a Comet",
+    className: "border border-orange-400/60 bg-orange-500/15 text-orange-100",
+    description: "Reclassified as an asteroid or inactive body.",
+  },
+  interstellar: {
+    label: "Interstellar Object",
+    className: "border border-purple-400/60 bg-purple-500/20 text-purple-100",
+    description: "Unbound visitor on an interstellar trajectory.",
+  },
+  unknown: {
+    label: "Unknown Classification",
+    className: "border border-slate-600/50 bg-slate-900/40 text-slate-200/70",
+    description: "Status not yet classified.",
+  },
+};
+
+const STATUS_FILTERS: Array<{ key: Exclude<StatusFilterKey, "all">; label: string; description: string }> = [
+  { key: "viable", label: "Viable Comets", description: "Only comets with active, returning orbits." },
+  { key: "lost", label: "Lost/Disrupted", description: "Objects with disrupted or missing orbits." },
+  { key: "unreliable", label: "Uncertain Orbit", description: "Comets with poorly constrained orbital elements." },
+  { key: "interstellar", label: "Interstellar Objects", description: "Visitors on hyperbolic, interstellar paths." },
+  { key: "asteroid", label: "Not Actually Comets", description: "Bodies reclassified as asteroids." },
+];
+
+const PREFIX_INFO: Record<PrefixKey, { title: string; description: string }> = {
+  P: { title: "P", description: "Short/medium-period returning comet (P-class)." },
+  C: { title: "C", description: "Long-period returning comet (C-class)." },
+  D: { title: "D", description: "Lost or disrupted comet (D-class)." },
+  X: { title: "X", description: "Orbit elements uncertain (X-class)." },
+  A: { title: "A", description: "Asteroidal object misclassified as a comet (A-class)." },
+  I: { title: "I", description: "Interstellar object on an unbound trajectory (I-class)." },
+};
+
+const NON_VIABLE_COUNTDOWN = {
+  label: "No recurring perihelion cycle",
+  className: "border-slate-700/60 bg-slate-900/40 text-foreground/60",
+};
+
+function normalizeStatus(status?: string | null): StatusKey {
+  const key = (status ?? "").toString().toLowerCase();
+  if (key === "viable") return "viable";
+  if (key === "lost") return "lost";
+  if (key === "unreliable") return "unreliable";
+  if (key === "asteroid") return "asteroid";
+  if (key === "interstellar") return "interstellar";
+  return "unknown";
+}
+
+function getPrefixInfo(prefix?: string | null) {
+  if (!prefix) return null;
+  const key = prefix.toUpperCase() as PrefixKey;
+  return PREFIX_INFO[key] ?? null;
+}
 
 type CometListVariant = "default" | "compact";
 type DurationBucket = { key: string; label: string; min?: number; max?: number };
@@ -190,8 +269,7 @@ export default function CometList({
   const [blast, setBlast] = useState(false);
   // trigger periodic re-render to keep countdown fresh
   const [, setNowTick] = useState<number>(Date.now());
-  const [orbitClasses, setOrbitClasses] = useState<string[]>([]);
-  const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all");
   const DURATION_BUCKETS = useMemo<DurationBucket[]>(
     () => [
       { key: "lt10", label: "< 10y", max: 10 },
@@ -210,7 +288,7 @@ export default function CometList({
   const [sortKey, setSortKey] = useState<"id" | "family" | "period" | "last" | "next" | "countdown">("countdown");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [filtersExpanded, setFiltersExpanded] = useState(false);
-  const activeFilterCount = selectedClasses.length + selectedBuckets.length;
+  const activeFilterCount = (statusFilter === "all" ? 0 : 1) + selectedBuckets.length;
 
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableId = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || "comets";
@@ -317,8 +395,10 @@ export default function CometList({
     try {
       setLoading(true);
       const queries: string[] = [Query.limit(400)];
-      if (selectedClasses.length > 0) {
-        queries.push(Query.equal("orbit_class", selectedClasses));
+      if (statusFilter === "viable") {
+        queries.push(Query.equal("is_viable", [true]));
+      } else if (statusFilter !== "all") {
+        queries.push(Query.equal("comet_status", [statusFilter]));
       }
       const res = await tables.listRows({ databaseId, tableId, queries });
       let rows = res.rows as CometRow[];
@@ -343,7 +423,7 @@ export default function CometList({
     } finally {
       setLoading(false);
     }
-  }, [databaseId, tableId, tables, selectedClasses, selectedBuckets, sortRows, onVisibleChange, DURATION_BUCKETS]);
+  }, [databaseId, tableId, tables, statusFilter, selectedBuckets, sortRows, onVisibleChange, DURATION_BUCKETS]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
@@ -368,26 +448,6 @@ export default function CometList({
         console.warn("Realtime subscribe failed", e);
       }
     }
-
-    // preload classes once
-    (async () => {
-      try {
-        const res = await tables.listRows({ databaseId, tableId, queries: [Query.limit(400)] });
-        const uniq = Array.from(new Set((res.rows as CometRow[]).map((r) => r.orbit_class).filter(Boolean))) as string[];
-        const order = ["Jupiter-family", "Encke", "Short-period", "Halley", "Long-period", "Hyperbolic", "Near-parabolic", "Non-periodic"];
-        uniq.sort((a, b) => {
-          const ia = order.findIndex((t) => a!.toLowerCase().includes(t.toLowerCase()));
-          const ib = order.findIndex((t) => b!.toLowerCase().includes(t.toLowerCase()));
-          const ra = ia === -1 ? 999 : ia;
-          const rb = ib === -1 ? 999 : ib;
-          if (ra !== rb) return ra - rb;
-          return a.localeCompare(b);
-        });
-        setOrbitClasses(uniq);
-      } catch {
-        // ignore
-      }
-    })();
 
     init();
     return () => {
@@ -494,19 +554,52 @@ export default function CometList({
   const renderedList = (items: CometRow[]) => (
     <Accordion className="space-y-2">
       {items.map((c) => {
+        const statusKey = normalizeStatus(c.comet_status);
+        const statusConfig = STATUS_CONFIG[statusKey];
         const info = lastNextPerihelion(c.last_perihelion_year ?? null, c.period_years ?? null);
-        const nextJD = nextPerihelionJD(c.last_perihelion_year ?? null, c.period_years ?? null);
-        const countdown = formatCountdown(nextJD);
+        const isViable = Boolean(c.is_viable);
+        const nextJD = isViable ? nextPerihelionJD(c.last_perihelion_year ?? null, c.period_years ?? null) : null;
+        const countdown = isViable ? formatCountdown(nextJD) : NON_VIABLE_COUNTDOWN;
+        const rowStyle = isViable ? countdown.rowStyle : undefined;
+        const prefixInfo = getPrefixInfo(c.prefix);
+        const displayName = c.name ?? c.designation ?? c.$id;
+        const detailNext = isViable ? info.next ?? "—" : "No recurring perihelion cycle";
+        const detailFooter = isViable
+          ? "> telemetry slot reserved for future flyby data"
+          : "> flybys disabled — classification is non-viable";
         const header = (open: boolean) => (
-          <div
-            className={`group rounded-md border border-transparent bg-[#0b1020]/60 hover:bg-[#0b1020]/80 transition-colors`}
-            style={countdown.rowStyle}
-          >
+          <div className={`group rounded-md border border-transparent bg-[#0b1020]/60 hover:bg-[#0b1020]/80 transition-colors`} style={rowStyle}>
             <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex min-w-0 items-center gap-2">
                 <span aria-hidden className={`text-foreground/60 transition-transform select-none ${open ? "rotate-90" : ""}`}>▸</span>
                 <div className="min-w-0">
-                  <div className="font-medium truncate">{c.name ?? c.designation ?? c.$id}</div>
+                  <div className="flex min-w-0 items-center gap-2">
+                    {prefixInfo ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          asChild
+                          className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[11px] font-semibold uppercase tracking-[0.1em] text-foreground/80"
+                        >
+                          <span>{prefixInfo.title}</span>
+                        </TooltipTrigger>
+                        <TooltipContent
+                          align="start"
+                          sideOffset={10}
+                          className="max-w-xs border border-white/10 bg-slate-950/95 px-3 py-2 text-[11px] leading-relaxed text-foreground/80 shadow-[0_20px_60px_-35px_rgba(110,203,255,0.6)]"
+                        >
+                          <div className="text-[10px] uppercase tracking-[0.35em] text-cyan-200/80">{prefixInfo.title}</div>
+                          <div className="mt-1 text-xs text-foreground/80">{prefixInfo.description}</div>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : null}
+                    <span className="min-w-0 truncate font-medium">{displayName}</span>
+                    <span
+                      className={`flex-shrink-0 rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] ${statusConfig.className}`}
+                      title={statusConfig.description}
+                    >
+                      {statusConfig.label}
+                    </span>
+                  </div>
                   <div className="mt-1 text-[11px] text-foreground/60">
                     {typeof c.period_years === "number" ? `Period ≈ ${c.period_years.toFixed(2)}y` : "Period unknown"}
                   </div>
@@ -539,12 +632,10 @@ export default function CometList({
                 </div>
                 <div>
                   <div className="uppercase tracking-[0.3em] text-foreground/50">Next perihelion</div>
-                  <div className="mt-1 text-sm text-foreground/80">{info.next ?? "—"}</div>
+                  <div className="mt-1 text-sm text-foreground/80">{detailNext}</div>
                 </div>
               </div>
-              <div className="font-mono text-[11px] tracking-wide text-accent/80">
-                {">"} telemetry slot reserved for future flyby data
-              </div>
+              <div className="font-mono text-[11px] tracking-wide text-accent/80">{detailFooter}</div>
             </div>
           </AccordionItem>
         );
@@ -587,34 +678,34 @@ export default function CometList({
           <div className={`mt-3 space-y-3 sm:mt-2 sm:space-y-0 ${filtersExpanded ? "block" : "hidden"} sm:block`}>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-md border border-white/10 bg-white/5 p-3">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300/70">Orbit groups</div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300/70">Comet classes</div>
                 <div className="mt-2">
                   <div className="flex items-center gap-2 overflow-x-auto pb-1 md:flex-wrap md:overflow-visible">
                     <button
                       type="button"
                       className={`flex-shrink-0 rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.2em] transition-colors ${
-                        selectedClasses.length === 0
+                        statusFilter === "all"
                           ? "border-cyan-500/40 bg-cyan-500/20 text-cyan-100"
                           : "border-slate-700/60 text-slate-300/80 hover:bg-slate-800/60"
                       }`}
-                      onClick={() => setSelectedClasses([])}
+                      onClick={() => setStatusFilter("all")}
                     >
                       All
                     </button>
                     <ToggleGroup
-                      type="multiple"
-                      value={selectedClasses}
-                      onValueChange={(v) => setSelectedClasses(v as string[])}
+                      type="single"
+                      value={statusFilter === "all" ? "" : statusFilter}
+                      onValueChange={(value) => setStatusFilter((value as StatusFilterKey) || "all")}
                       className="flex flex-nowrap gap-2 md:flex-wrap"
                     >
-                      {orbitClasses.map((c) => (
+                      {STATUS_FILTERS.map((filter) => (
                         <ToggleGroupItem
-                          key={c}
-                          value={c}
-                          title={c}
+                          key={filter.key}
+                          value={filter.key}
+                          title={filter.description}
                           className="flex-shrink-0 whitespace-nowrap rounded-full border border-slate-700/60 px-3 py-1 text-[11px] uppercase tracking-[0.2em] data-[state=on]:border-cyan-500/40 data-[state=on]:bg-cyan-500/15 data-[state=on]:text-cyan-100 md:flex-shrink"
                         >
-                          {c}
+                          {filter.label}
                         </ToggleGroupItem>
                       ))}
                     </ToggleGroup>

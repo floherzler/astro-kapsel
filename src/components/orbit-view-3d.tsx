@@ -27,6 +27,66 @@ type CometRow = {
   is_viable?: boolean | null;
 };
 
+type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "interstellar" | "unknown";
+
+const ORBIT_STATUS_STYLES: Record<
+  StatusKey,
+  {
+    label: string;
+    color: string;
+    opacity: number;
+    dash?: { dash: number; gap: number };
+    glow?: boolean;
+    blend?: "additive" | "normal";
+  }
+> = {
+  viable: {
+    label: "Periodic / Returning",
+    color: "#59d6ff",
+    opacity: 0.95,
+    glow: true,
+  },
+  lost: {
+    label: "Lost / Disrupted",
+    color: "#8e8e8e",
+    opacity: 0.4,
+    dash: { dash: 0.35, gap: 1.2 },
+  },
+  unreliable: {
+    label: "Uncertain Orbit",
+    color: "#ffc857",
+    opacity: 0.7,
+    dash: { dash: 0.6, gap: 0.55 },
+  },
+  asteroid: {
+    label: "Not a Comet",
+    color: "#ff966a",
+    opacity: 0.75,
+  },
+  interstellar: {
+    label: "Interstellar Object",
+    color: "#b45eff",
+    opacity: 0.85,
+    glow: true,
+    blend: "additive",
+  },
+  unknown: {
+    label: "Unknown Classification",
+    color: "#aaaaaa",
+    opacity: 0.35,
+  },
+};
+
+function normalizeStatus(status?: string | null): StatusKey {
+  const key = (status ?? "").toLowerCase();
+  if (key === "viable") return "viable";
+  if (key === "lost") return "lost";
+  if (key === "unreliable") return "unreliable";
+  if (key === "asteroid") return "asteroid";
+  if (key === "interstellar") return "interstellar";
+  return "unknown";
+}
+
 function jdNow(): number {
   return Date.now() / 86400000 + 2440587.5;
 }
@@ -261,8 +321,6 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
       cameraRef.current.lookAt(0, 0, 0);
     }
 
-    const hues = [200, 160, 40, 300, 20, 120, 260, 0];
-
     // --- Planet orbits (hardcoded, 8 planets) ---
     if (showPlanets) {
       const planets = [
@@ -353,6 +411,10 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
       const iDeg = r.inclination_deg ?? 0; // if not available, keep in ecliptic plane
       const oDeg = r.ascending_node_deg ?? 0;
       const wDeg = r.arg_periapsis_deg ?? 0;
+      const statusKey = normalizeStatus(r.comet_status);
+      const style = ORBIT_STATUS_STYLES[statusKey];
+      const color = new THREE.Color(style.color);
+      const isViable = Boolean(r.is_viable);
 
       const i = THREE.MathUtils.degToRad(iDeg);
       const O = THREE.MathUtils.degToRad(oDeg);
@@ -374,14 +436,53 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
         points.push(v);
       }
       const curveGeom = new THREE.BufferGeometry().setFromPoints(points);
-      const color = new THREE.Color().setHSL((hues[idx % hues.length] / 360), 0.9, 0.7);
-      const line = new THREE.Line(
-        curveGeom,
-        new THREE.LineBasicMaterial({ color, linewidth: 1 })
-      );
-      line.userData = { label: r.name || r.designation || r.$id };
+      const transparent = style.opacity < 1;
+      let lineMaterial: THREE.LineBasicMaterial | THREE.LineDashedMaterial;
+      if (style.dash) {
+        const dashUnit = Math.max(unitsPerAU * 0.25, 0.35);
+        lineMaterial = new THREE.LineDashedMaterial({
+          color,
+          opacity: style.opacity,
+          transparent,
+          dashSize: Math.max(0.2, dashUnit * style.dash.dash),
+          gapSize: Math.max(0.25, dashUnit * style.dash.gap),
+        });
+      } else {
+        lineMaterial = new THREE.LineBasicMaterial({
+          color,
+          opacity: style.opacity,
+          transparent,
+          blending: style.blend === "additive" ? THREE.AdditiveBlending : THREE.NormalBlending,
+        });
+      }
+
+      const line = new THREE.Line(curveGeom, lineMaterial);
+      if (lineMaterial instanceof THREE.LineDashedMaterial) {
+        line.computeLineDistances();
+      }
+      const prefix = r.prefix ? String(r.prefix).toUpperCase() : null;
+      const baseLabel = r.name || r.designation || r.$id;
+      const nameLabel = prefix ? `${prefix} · ${baseLabel}` : baseLabel;
+      line.userData = { label: `${nameLabel} — ${style.label}` };
       group.add(line);
       interactives.push(line);
+
+      if (style.glow) {
+        const glowGeom = curveGeom.clone();
+        const glowMat = new THREE.LineBasicMaterial({
+          color,
+          opacity: Math.min(0.4, style.opacity * 0.5),
+          transparent: true,
+          blending: THREE.AdditiveBlending,
+        });
+        const glowLine = new THREE.Line(glowGeom, glowMat);
+        if (lineMaterial instanceof THREE.LineDashedMaterial) {
+          glowLine.computeLineDistances();
+        }
+        glowLine.userData = line.userData;
+        group.add(glowLine);
+        interactives.push(glowLine);
+      }
 
       // Current position marker if tp & P available
       if (r.last_perihelion_year && r.period_years) {
@@ -398,36 +499,44 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
           pos.applyAxisAngle(new THREE.Vector3(0, 0, 1), O);
           pos.multiplyScalar(unitsPerAU);
 
-          const markerGeom = new THREE.SphereGeometry(1.4, 16, 16);
-          const markerMat = new THREE.MeshBasicMaterial({ color });
+          const markerGeom = new THREE.SphereGeometry(isViable ? 1.4 : 1.0, 16, 16);
+          const markerMat = new THREE.MeshBasicMaterial({
+            color,
+            opacity: isViable ? 1 : 0.75,
+            transparent: !isViable,
+            blending: isViable ? THREE.AdditiveBlending : THREE.NormalBlending,
+          });
           const marker = new THREE.Mesh(markerGeom, markerMat);
           marker.position.copy(pos);
-          marker.userData = { label: r.name || r.designation || r.$id };
+          marker.userData = line.userData;
           group.add(marker);
           interactives.push(marker);
 
-          // Ion tail: tapered, pointing away from the Sun
-          // Length scales inversely with heliocentric distance (longer nearer the Sun)
-          const away = pos.clone().normalize();
-          const rAU = pos.length() / Math.max(1e-6, unitsPerAU); // rough distance in AU (scene-scaled)
-          const length = Math.max(10, unitsPerAU * (0.6 + 1.8 / Math.max(0.2, rAU)));
-          const topRadius = 0.2; // near the nucleus
-          const bottomRadius = Math.min(3.0, 0.4 + 1.2 / Math.max(0.2, rAU));
-          const tailGeom = new THREE.CylinderGeometry(topRadius, bottomRadius, length, 12, 1, true);
-          const tailMat = new THREE.MeshBasicMaterial({
-            color: 0x81d4fa,
-            transparent: true,
-            opacity: 0.35,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-          });
-          const tail = new THREE.Mesh(tailGeom, tailMat);
-          // Orient cylinder Y-axis along 'away'
-          const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), away);
-          tail.quaternion.copy(quat);
-          // Position so the narrow end sits at the comet position
-          tail.position.copy(pos.clone().add(away.clone().multiplyScalar(length / 2)));
-          group.add(tail);
+          if (isViable) {
+            // Ion tail: tapered, pointing away from the Sun
+            // Length scales inversely with heliocentric distance (longer nearer the Sun)
+            const away = pos.clone().normalize();
+            const rAU = pos.length() / Math.max(1e-6, unitsPerAU); // rough distance in AU (scene-scaled)
+            const length = Math.max(10, unitsPerAU * (0.6 + 1.8 / Math.max(0.2, rAU)));
+            const topRadius = 0.2; // near the nucleus
+            const bottomRadius = Math.min(3.0, 0.4 + 1.2 / Math.max(0.2, rAU));
+            const tailGeom = new THREE.CylinderGeometry(topRadius, bottomRadius, length, 12, 1, true);
+            const tailColor = color.clone().offsetHSL(0, 0.05, 0.1);
+            const tailMat = new THREE.MeshBasicMaterial({
+              color: tailColor,
+              transparent: true,
+              opacity: 0.35,
+              depthWrite: false,
+              blending: THREE.AdditiveBlending,
+            });
+            const tail = new THREE.Mesh(tailGeom, tailMat);
+            // Orient cylinder Y-axis along 'away'
+            const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), away);
+            tail.quaternion.copy(quat);
+            // Position so the narrow end sits at the comet position
+            tail.position.copy(pos.clone().add(away.clone().multiplyScalar(length / 2)));
+            group.add(tail);
+          }
         }
       }
     }

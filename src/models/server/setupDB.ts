@@ -44,6 +44,7 @@ export default async function getOrCreateDB() {
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "name", size: 255, required: true });
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "designation", size: 255, required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "orbit_class", size: 255, required: false });
+        await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "orbit_class_code", size: 5, required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "prefix", size: 4, required: false });
         await tablesDB.createStringColumn({ databaseId, tableId: "comets", key: "comet_status", size: 50, required: true });
         await tablesDB.createBooleanColumn({ databaseId, tableId: "comets", key: "is_viable", required: true });

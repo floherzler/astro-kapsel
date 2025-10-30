@@ -1,339 +1,144 @@
 import { Client, TablesDB, ID, Query } from "npm:node-appwrite";
 
-type Body = {
-    cometID?: string; // e.g. "1P" or "1P/Halley"
-};
+type Body = { cometID?: string };
 
 function extractNasaMessage(payload: any): string | null {
     if (!payload) return null;
     const { message, error } = payload;
     if (typeof message === "string") return message;
-    if (message && typeof message === "object") {
-        if (typeof message.message === "string") return message.message;
-        if (typeof message.description === "string") return message.description;
-        if (Array.isArray(message)) {
-            const merged = message.filter((m) => typeof m === "string").join(" ").trim();
-            if (merged) return merged;
-        }
-    }
+    if (message?.message) return message.message;
+    if (message?.description) return message.description;
+    if (Array.isArray(message)) return message.filter((m) => typeof m === "string").join(" ");
     if (typeof error === "string") return error;
-    if (error && typeof error === "object" && typeof error.message === "string") {
-        return error.message;
-    }
+    if (error?.message) return error.message;
     return null;
 }
 
-function classifyComet(designation: string | null) {
-    if (!designation) {
-        return { prefix: null, comet_status: "unknown", is_viable: false };
+/**
+ * Hybrid classification using both prefix (naming) + orbit_class.code (dynamic orbit type)
+ */
+function classifyComet(nasaObj: any) {
+    const prefix = nasaObj?.prefix?.toUpperCase() ?? null;
+    const orbitCode = nasaObj?.orbit_class?.code?.toUpperCase() ?? null;
+
+    // Prefix overrides (naming meaning)
+    if (prefix === "D") return { prefix, status: "lost", is_viable: false };
+    if (prefix === "X") return { prefix, status: "unreliable", is_viable: false };
+    if (prefix === "A") return { prefix, status: "asteroid", is_viable: false };
+    if (prefix === "I") return { prefix, status: "interstellar", is_viable: false };
+
+    // Physical orbit type classification
+    switch (orbitCode) {
+        case "JFC": return { prefix, status: "periodic", is_viable: true };     // Jupiter-family comet
+        case "HTC": return { prefix, status: "periodic", is_viable: true };     // Halley-type comet
+        case "LPC": return { prefix, status: "long-period", is_viable: true };  // Long-period comet
+        case "HYP": return { prefix, status: "hyperbolic", is_viable: false };  // Non-returning
+        case "MBA":
+        case "AST": return { prefix, status: "asteroid", is_viable: false };
+        default: return { prefix, status: "unknown", is_viable: false };
     }
-
-    const prefix = designation.split("/")[0]; // e.g. "1P", "C", "D", "I", etc.
-    const first = prefix.replace(/[0-9]/g, "").toUpperCase(); // normalize, remove numbers
-
-    switch (first) {
-        case "P": // periodic (<200y or confirmed multiple perihelia)
-        case "C": // long-period but real comet
-            return { prefix: first, comet_status: "viable", is_viable: true };
-
-        case "D": // lost / split / no longer exists
-            return { prefix: first, comet_status: "lost", is_viable: false };
-
-        case "X": // uncertain orbit — do NOT generate flybys
-            return { prefix: first, comet_status: "unreliable", is_viable: false };
-
-        case "A": // not a comet (asteroid on comet-like orbit)
-            return { prefix: first, comet_status: "asteroid", is_viable: false };
-
-        case "I": // interstellar object
-            return { prefix: first, comet_status: "interstellar", is_viable: false };
-
-        default:
-            return { prefix: first ?? null, comet_status: "unknown", is_viable: false };
-    }
-}
-
-// Summary field to extract prefix type from fullname
-function getPrefixType(fullname: string): string | null {
-    const match = fullname.match(/^([A-Z])\//);
-    return match ? match[1] : null;
-}
-
-
-
-function ok(res: any, data: unknown, status = 200) {
-    return res.json(data, status);
-}
-function fail(res: any, msg: string, status = 400, extra: Record<string, unknown> = {}) {
-    return res.json({ success: false, error: msg, ...extra }, status);
-}
-
-function buildCandidateMessage(cometID: string, list: any[]) {
-    const names = Array.isArray(list)
-        ? list
-            .map((entry: any) => {
-                const pdes = typeof entry?.pdes === "string" ? entry.pdes : null;
-                const name = typeof entry?.name === "string" ? entry.name : null;
-                if (pdes && name) return `${name} (${pdes})`;
-                return pdes ?? name ?? null;
-            })
-            .filter(Boolean)
-        : [];
-    const joined = names.join(", ");
-    const message =
-        joined.length > 0
-            ? `Multiple matches found for "${cometID}". Candidates: ${joined}`
-            : `Multiple matches found for "${cometID}". Please refine your query.`;
-    return { message, names };
 }
 
 export default async ({ req, res, log, error }: any) => {
     try {
-        // --- Parse body ---
-        let body: Body = {};
-        try {
-            body = await req.json();
-            log(`[addComet] Parsed JSON body keys: ${Object.keys(body).join(",")}`);
-        } catch {
-            log("[addComet] req.json() failed, trying fallback...");
-            if (typeof req.bodyText === "string" && req.bodyText.length > 0) {
-                try {
-                    body = JSON.parse(req.bodyText);
-                    log(`[addComet] Parsed bodyText JSON keys: ${Object.keys(body).join(",")}`);
-                } catch {
-                    log("[addComet] bodyText is not valid JSON");
-                }
-            } else if (typeof req.payload === "string" && req.payload.length > 0) {
-                try {
-                    body = JSON.parse(req.payload);
-                    log(`[addComet] Parsed payload JSON keys: ${Object.keys(body).join(",")}`);
-                } catch {
-                    log("[addComet] payload is not valid JSON");
-                }
-            }
-        }
-
-        if (!body?.cometID) return fail(res, "Missing required field: cometID");
-
+        // --- Parse input ---
+        const body: Body = await req.json().catch(() => ({}));
+        if (!body?.cometID) return res.json({ error: "Missing cometID" }, 400);
         const cometID = body.cometID.trim();
-        log(`[addComet] Fetching data for comet ${cometID} ☄️`);
+        log(`☄️ Fetching ${cometID}`);
 
-        // --- NASA API call ---
+        // --- Fetch from NASA SBDB ---
         const nasaUrl = `https://ssd-api.jpl.nasa.gov/sbdb.api?sstr=${encodeURIComponent(cometID)}`;
-        let nasaData: any;
-        try {
-            log(`[addComet] Calling NASA SBDB: ${nasaUrl}`);
-            const response = await fetch(nasaUrl);
-            const status = response.status;
-            log(`[addComet] NASA response status: ${status}`);
+        const response = await fetch(nasaUrl);
+        const raw = await response.text();
+        const nasaData = JSON.parse(raw);
 
-            let rawPayload: string | null = null;
-            let parsedPayload: any = null;
-            try {
-                rawPayload = await response.text();
-                parsedPayload = rawPayload ? JSON.parse(rawPayload) : null;
-            } catch {
-                // Fall back to raw text payload if JSON parse fails
-            }
-
-            if (status === 300 && parsedPayload?.list?.length) {
-                const { message, names } = buildCandidateMessage(cometID, parsedPayload.list);
-                return fail(res, message, 409, {
-                    cometID,
-                    candidates: parsedPayload.list,
-                    candidateNames: names,
-                });
-            }
-
-            if (!response.ok) {
-                const reason =
-                    extractNasaMessage(parsedPayload) ?? `NASA SBDB request failed (${status})`;
-                return fail(res, reason, status, {
-                    cometID,
-                    details: parsedPayload ?? rawPayload,
-                });
-            }
-
-            if (!parsedPayload || typeof parsedPayload !== "object") {
-                return fail(res, "Unexpected NASA SBDB response format", 502, {
-                    cometID,
-                    details: rawPayload,
-                });
-            }
-
-            if (parsedPayload?.list?.length && !parsedPayload?.object) {
-                // Handle ambiguous matches even if NASA returned HTTP 200 (e.g. neo filter cases)
-                const { message, names } = buildCandidateMessage(cometID, parsedPayload.list);
-                return fail(res, message, 409, {
-                    cometID,
-                    candidates: parsedPayload.list,
-                    candidateNames: names,
-                });
-            }
-
-            nasaData = parsedPayload;
-            log("[addComet] Parsed NASA response successfully");
-        } catch (err) {
-            log(`[addComet] Error contacting NASA API: ${err}`);
-            return fail(res, "Failed to fetch NASA SBDB data", 502);
+        if (!response.ok || !nasaData?.object?.fullname) {
+            return res.json({ error: extractNasaMessage(nasaData) ?? "Not found" }, 404);
         }
 
-        if (!nasaData?.object?.fullname) {
-            const nasaMessage = extractNasaMessage(nasaData);
-            const reason =
-                nasaMessage && nasaMessage.length > 0
-                    ? nasaMessage
-                    : `Comet ID "${cometID}" not found in NASA SBDB`;
-            return fail(res, reason, 404, { cometID });
-        }
-
-        // --- Extract summary (correct field mapping) ---
+        // Extract orbital elements
         const els = nasaData.orbit?.elements ?? [];
-        const val = (n: string) => els.find((e: any) => e.name === n)?.value ?? null;
+        const val = (n: string) => parseFloat(els.find((e: any) => e.name === n)?.value ?? null);
 
-        const base = {
-            name: nasaData.object.fullname ?? null,
-            designation: nasaData.object.des ?? null,
+        // Hybrid classification
+        const cls = classifyComet(nasaData.object);
+
+        const summary = {
+            name: nasaData.object.fullname,
+            designation: nasaData.object.des,
+            prefix: cls.prefix,
+            comet_status: cls.status,
+            is_viable: cls.is_viable,
             orbit_class: nasaData.object.orbit_class?.name ?? null,
-            eccentricity: val("e") ? parseFloat(val("e")) : null,
-            semi_major_axis: val("a") ? parseFloat(val("a")) : null,
-            perihelion_distance: val("q") ? parseFloat(val("q")) : null,
-            period_years: val("per") ? parseFloat(val("per")) / 365.25 : null,
-            last_perihelion_year: val("tp") ? parseFloat(val("tp")) : null, // store JD directly
-            // Orientation (degrees)
-            inclination_deg: val("i") ? parseFloat(val("i")) : null,
-            ascending_node_deg: val("om") ? parseFloat(val("om")) : null,
-            arg_periapsis_deg: val("w") ? parseFloat(val("w")) : null,
+            orbit_class_code: nasaData.object.orbit_class?.code ?? null,
+            eccentricity: val("e") || null,
+            semi_major_axis: val("a") || null,
+            perihelion_distance: val("q") || null,
+            period_years: val("per") ? val("per") / 365.25 : null,
+            last_perihelion_year: val("tp") || null,
+            inclination_deg: val("i") || null,
+            ascending_node_deg: val("om") || null,
+            arg_periapsis_deg: val("w") || null,
             source: nasaData.signature?.source ?? "NASA/JPL SBDB",
         };
 
-        const fullname = nasaData.object.fullname ?? "";
-        const { prefix, comet_status, is_viable } = classifyComet(fullname);
-
-        const summary = {
-            ...base,
-            prefix,
-            comet_status,
-            is_viable,
-        };
-        log(`[addComet] Extracted comet summary: ${JSON.stringify(summary)}`);
-
-        // --- Connect to Appwrite ---
-        const endpoint = Deno.env.get("APPWRITE_FUNCTION_API_ENDPOINT") ?? "";
-        const projectId = Deno.env.get("APPWRITE_FUNCTION_PROJECT_ID") ?? "";
-        const apiKey =
-            req.headers["x-appwrite-key"] ??
-            Deno.env.get("APPWRITE_API_KEY") ??
-            "";
-
+        // --- Appwrite setup ---
         const client = new Client()
-            .setEndpoint(endpoint)
-            .setProject(projectId);
-
-        if (apiKey && typeof apiKey === "string") {
-            client.setKey(apiKey);
-        }
-        log("[addComet] Appwrite client configured");
+            .setEndpoint(Deno.env.get("APPWRITE_FUNCTION_API_ENDPOINT")!)
+            .setProject(Deno.env.get("APPWRITE_FUNCTION_PROJECT_ID")!)
+            .setKey(req.headers["x-appwrite-key"] ?? Deno.env.get("APPWRITE_API_KEY")!);
 
         const tablesDB = new TablesDB(client);
-        const databaseId = Deno.env.get("APPWRITE_DATABASE_ID") ?? "astroDB";
-        const cometsTableId = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
-        const flybyTableId = Deno.env.get("APPWRITE_TABLE_FLYBYS") ?? "flybys";
-        log(
-            `[addComet] Using database ${databaseId}, comets table ${cometsTableId}, flybys table ${flybyTableId}`
-        );
+        const databaseId = Deno.env.get("APPWRITE_DATABASE_ID")!;
+        const comets = Deno.env.get("APPWRITE_TABLE_COMETS")!;
+        const flybys = Deno.env.get("APPWRITE_TABLE_FLYBYS")!;
 
-        // --- Prevent duplicates ---
-        try {
-            const existing = await tablesDB.listRows({
-                databaseId,
-                tableId: cometsTableId,
-                queries: [Query.equal("designation", summary.designation)],
-            });
+        // Prevent duplicates
+        const existing = await tablesDB.listRows({
+            databaseId,
+            tableId: comets,
+            queries: [Query.equal("designation", summary.designation)],
+        });
+        if (existing.total > 0) return res.json({ message: "Already exists", comet: existing.rows[0] });
 
-            if (existing.total > 0) {
-                log(`[addComet] Comet ${summary.designation} already exists`);
-                return ok(res, {
-                    success: true,
-                    message: `Comet ${summary.name} already exists`,
-                    comet: existing.rows[0],
+        // Insert comet
+        const newRow = await tablesDB.createRow({
+            databaseId,
+            tableId: comets,
+            rowId: ID.unique(),
+            data: summary,
+        });
+
+        // Generate flybys only for viable repeat comets
+        if (summary.is_viable && summary.period_years && summary.last_perihelion_year) {
+            const jdToYear = (jd: number) => 2000 + (jd - 2451545.0) / 365.25;
+            const lastYear = jdToYear(summary.last_perihelion_year);
+            const period = summary.period_years;
+
+            const entries = [];
+            for (let n = -5; n <= 1; n++) {
+                entries.push({
+                    comet: newRow.$id,
+                    year: lastYear + n * period,
+                    flagged: false,
                 });
             }
-        } catch (checkErr) {
-            log(`[addComet] Warning: could not check for duplicates (${checkErr})`);
-        }
 
-        // --- Insert into Appwrite ---
-        let newRow;
-        try {
-            log("[addComet] Creating comet row in Appwrite");
-            newRow = await tablesDB.createRow({
-                databaseId,
-                tableId: cometsTableId,
-                rowId: ID.unique(),
-                data: summary,
-            });
-            log(`[addComet] Appwrite comet row created: ${newRow.$id}`);
-        } catch (insertErr) {
-            log(`[addComet] Failed to insert comet into Appwrite: ${insertErr}`);
-            return fail(res, "Database insert failed", 500);
-        }
-
-        log(`[addComet] Successfully added comet ${summary.name} to Appwrite ✅`);
-
-        // Only generate flybys for real comets
-        if (newRow && summary.is_viable && summary.period_years && summary.last_perihelion_year != null) {
-            try {
-                const period = summary.period_years;
-                const jd = summary.last_perihelion_year;
-
-                // Convert Julian Date → approximate decimal year
-                const jdToYear = (jd: number) => 2000 + (jd - 2451545.0) / 365.25;
-
-                const lastYear = jdToYear(jd);
-                const flybys = [];
-
-                // Generate 5 past + 1 future flyby estimates
-                for (let n = -5; n <= 1; n++) {
-                    flybys.push({
-                        comet: newRow.$id,
-                        year: lastYear + n * period,
-                        description: null,
-                        flagged: false,
-                        llm_model_used: null,
-                    });
-                }
-
-                // Insert flybys sequentially
-                for (const f of flybys) {
-                    log(`[addComet] Creating flyby for year ${f.year}`);
-                    await tablesDB.createRow({
-                        databaseId,
-                        tableId: flybyTableId,
-                        rowId: ID.unique(),
-                        data: f,
-                    });
-                }
-
-                log(`[addComet] Added ${flybys.length} flybys for comet ${summary.name}`);
-            } catch (flyErr) {
-                log(`[addComet] Failed to create flybys: ${flyErr}`);
+            for (const f of entries) {
+                await tablesDB.createRow({
+                    databaseId,
+                    tableId: flybys,
+                    rowId: ID.unique(),
+                    data: f,
+                });
             }
         }
 
+        return res.json({ success: true, comet: newRow }, 201);
 
-        return ok(
-            res,
-            {
-                success: true,
-                message: `☄️ Comet ${summary.name} added successfully!`,
-                comet: newRow,
-            },
-            201
-        );
     } catch (e: any) {
-        const msg = String(e?.message ?? e);
-        error(`[addComet] Uncaught error 🚨: ${msg}`);
-        return fail(res, "Internal server error", 500, { details: msg });
+        error(e);
+        return res.json({ error: "Internal server error", details: e?.message }, 500);
     }
 };

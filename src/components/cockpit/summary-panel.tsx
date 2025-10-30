@@ -27,6 +27,9 @@ type CometRow = {
   $id: string;
   name?: string | null;
   designation?: string | null;
+  prefix?: string | null;
+  comet_status?: string | null;
+  is_viable?: boolean | null;
 };
 
 type FlybyRow = {
@@ -291,8 +294,9 @@ function getRelationId(value: unknown): string | null {
 function formatCometLabel(row: CometRow) {
   const name = row.name?.trim();
   const designation = row.designation?.trim();
-  if (name && designation && name !== designation) return `${name} · ${designation}`;
-  return name ?? designation ?? row.$id;
+  const base = name && designation && name !== designation ? `${name} · ${designation}` : name ?? designation ?? row.$id;
+  const prefix = row.prefix?.trim();
+  return prefix ? `${prefix} · ${base}` : base;
 }
 
 function formatYear(value?: number | null): string {
@@ -793,6 +797,12 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     clearStatus,
   } = useSummaryPanelContext();
 
+  const selectedComet = useMemo(
+    () => comets.find((row) => row.$id === selectedCometId) ?? null,
+    [comets, selectedCometId]
+  );
+  const isSelectedViable = Boolean(selectedComet?.is_viable);
+
   const falAudioRef = useRef<HTMLAudioElement | null>(null);
   const falAudioCleanupRef = useRef<(() => void) | null>(null);
   const falAudioUnlockedRef = useRef(false);
@@ -1014,6 +1024,12 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     );
   }
 
+  const hasSummary = Boolean(summary);
+  const generationBlocked = !isSelectedViable;
+  const otherWindowPending = Boolean(pendingWindowId) && pendingWindowId !== activeWindow.id;
+  const buttonDisabled = generationBlocked || hasSummary || otherWindowPending;
+  const shouldPulse = !generationBlocked && !hasSummary && !isPending;
+
   return (
     <Card
       className={`relative aspect-square w-full flex min-h-0 flex-col overflow-visible rounded-2xl border border-slate-800/60 bg-gradient-to-b from-slate-950/85 via-slate-950/70 to-slate-950/85 text-xs text-slate-200/85 cockpit-panel-glow ${className}`}
@@ -1120,18 +1136,25 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
             size="sm"
             variant="space"
             onClick={() => handleGenerate(activeWindow)}
-            disabled={Boolean(summary) || (Boolean(pendingWindowId) && pendingWindowId !== activeWindow.id)}
-            className={`w-full justify-center ${summary
-              ? "cursor-default border-cyan-400/25 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/15"
-              : !isPending
-                ? "animate-pulse"
-                : ""
-              }`}
-            style={!summary && !isPending ? { animationDuration: "2.4s" } : undefined}
+            disabled={buttonDisabled}
+            className={`w-full justify-center ${
+              hasSummary
+                ? "cursor-default border-cyan-400/25 bg-cyan-500/15 text-cyan-100 hover:bg-cyan-500/15"
+                : generationBlocked
+                  ? "cursor-not-allowed border-slate-700/60 bg-slate-900/40 text-slate-300/70"
+                  : shouldPulse
+                    ? "animate-pulse"
+                    : ""
+            }`}
+            style={shouldPulse ? { animationDuration: "2.4s" } : undefined}
           >
-            {summary ? (
+            {hasSummary ? (
               <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/85 sm:text-[12px]">
                 Briefing ready
+              </span>
+            ) : generationBlocked ? (
+              <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-slate-300/75 sm:text-[12px]">
+                No recurring perihelion cycle
               </span>
             ) : isPending ? (
               <span className="flex w-full items-center justify-center gap-2 text-[11px] uppercase tracking-[0.3em] text-cyan-200/80 sm:text-[12px]">
