@@ -30,6 +30,25 @@ function fail(res: any, msg: string, status = 400, extra: Record<string, unknown
     return res.json({ success: false, error: msg, ...extra }, status);
 }
 
+function buildCandidateMessage(cometID: string, list: any[]) {
+    const names = Array.isArray(list)
+        ? list
+              .map((entry: any) => {
+                  const pdes = typeof entry?.pdes === "string" ? entry.pdes : null;
+                  const name = typeof entry?.name === "string" ? entry.name : null;
+                  if (pdes && name) return `${name} (${pdes})`;
+                  return pdes ?? name ?? null;
+              })
+              .filter(Boolean)
+        : [];
+    const joined = names.join(", ");
+    const message =
+        joined.length > 0
+            ? `Multiple matches found for "${cometID}". Candidates: ${joined}`
+            : `Multiple matches found for "${cometID}". Please refine your query.`;
+    return { message, names };
+}
+
 export default async ({ req, res, log, error }: any) => {
     try {
         // --- Parse body ---
@@ -67,13 +86,54 @@ export default async ({ req, res, log, error }: any) => {
         try {
             log(`[addComet] Calling NASA SBDB: ${nasaUrl}`);
             const response = await fetch(nasaUrl);
-            log(`[addComet] NASA response status: ${response.status}`);
-            if (!response.ok) {
-                return fail(res, `NASA API returned ${response.status}`, response.status, {
-                    details: await response.text(),
+            const status = response.status;
+            log(`[addComet] NASA response status: ${status}`);
+
+            let rawPayload: string | null = null;
+            let parsedPayload: any = null;
+            try {
+                rawPayload = await response.text();
+                parsedPayload = rawPayload ? JSON.parse(rawPayload) : null;
+            } catch {
+                // Fall back to raw text payload if JSON parse fails
+            }
+
+            if (status === 300 && parsedPayload?.list?.length) {
+                const { message, names } = buildCandidateMessage(cometID, parsedPayload.list);
+                return fail(res, message, 409, {
+                    cometID,
+                    candidates: parsedPayload.list,
+                    candidateNames: names,
                 });
             }
-            nasaData = await response.json();
+
+            if (!response.ok) {
+                const reason =
+                    extractNasaMessage(parsedPayload) ?? `NASA SBDB request failed (${status})`;
+                return fail(res, reason, status, {
+                    cometID,
+                    details: parsedPayload ?? rawPayload,
+                });
+            }
+
+            if (!parsedPayload || typeof parsedPayload !== "object") {
+                return fail(res, "Unexpected NASA SBDB response format", 502, {
+                    cometID,
+                    details: rawPayload,
+                });
+            }
+
+            if (parsedPayload?.list?.length && !parsedPayload?.object) {
+                // Handle ambiguous matches even if NASA returned HTTP 200 (e.g. neo filter cases)
+                const { message, names } = buildCandidateMessage(cometID, parsedPayload.list);
+                return fail(res, message, 409, {
+                    cometID,
+                    candidates: parsedPayload.list,
+                    candidateNames: names,
+                });
+            }
+
+            nasaData = parsedPayload;
             log("[addComet] Parsed NASA response successfully");
         } catch (err) {
             log(`[addComet] Error contacting NASA API: ${err}`);
