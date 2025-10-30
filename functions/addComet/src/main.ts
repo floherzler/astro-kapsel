@@ -157,7 +157,7 @@ export default async ({ req, res, log, error }: any) => {
         if (apiKey) client.setKey(String(apiKey));
 
         const tablesDB = new TablesDB(client);
-        const databaseId = Deno.env.get("APPWRITE_DATABASE_ID")!;
+        const databaseId = Deno.env.get("APPWRITE_DATABASE_ID")! ?? "astroDB";
         const cometsTable = Deno.env.get("APPWRITE_TABLE_COMETS") ?? "comets";
         const flybysTable = Deno.env.get("APPWRITE_TABLE_FLYBYS") ?? "flybys";
 
