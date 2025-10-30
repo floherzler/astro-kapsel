@@ -53,6 +53,13 @@ function classifyComet(designation: string | null) {
     }
 }
 
+// Summary field to extract prefix type from fullname
+function getPrefixType(fullname: string): string | null {
+    const match = fullname.match(/^([A-Z])\//);
+    return match ? match[1] : null;
+}
+
+
 
 function ok(res: any, data: unknown, status = 200) {
     return res.json(data, status);
@@ -200,7 +207,8 @@ export default async ({ req, res, log, error }: any) => {
             source: nasaData.signature?.source ?? "NASA/JPL SBDB",
         };
 
-        const { prefix, comet_status, is_viable } = classifyComet(nasaData.object.des ?? null);
+        const fullname = nasaData.object.fullname ?? "";
+        const { prefix, comet_status, is_viable } = classifyComet(fullname);
 
         const summary = {
             ...base,
@@ -208,6 +216,7 @@ export default async ({ req, res, log, error }: any) => {
             comet_status,
             is_viable,
         };
+        log(`[addComet] Extracted comet summary: ${JSON.stringify(summary)}`);
 
         // --- Connect to Appwrite ---
         const endpoint = Deno.env.get("APPWRITE_FUNCTION_API_ENDPOINT") ?? "";
