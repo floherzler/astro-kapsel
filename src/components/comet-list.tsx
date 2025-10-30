@@ -36,6 +36,12 @@ type CometSuggestion = {
   suggestion_label: string;
 };
 
+type CountdownDisplay = {
+  label: string;
+  className: string;
+  rowStyle?: CSSProperties;
+};
+
 const STATUS_CONFIG: Record<
   Exclude<StatusKey, "viable">,
   { label: string; className: string; description: string }
@@ -94,9 +100,10 @@ const VIABLE_TOOLTIP = {
   description: "Active comet with reliable returns. Flybys, summaries, and countdowns are available.",
 };
 
-const NON_VIABLE_COUNTDOWN = {
+const NON_VIABLE_COUNTDOWN: CountdownDisplay = {
   label: "—",
   className: "border-slate-700/60 bg-slate-900/40 text-foreground/60",
+  rowStyle: undefined,
 };
 
 function normalizeStatus(status?: string | null, isViable?: boolean | null): StatusKey {
@@ -199,8 +206,10 @@ function lastPerihelionJD(tpJD?: number | null, periodYears?: number | null): nu
   return lastJD;
 }
 
-function formatCountdown(nextJD: number | null): { label: string; className: string; rowStyle?: CSSProperties } {
-  if (!nextJD) return { label: "—", className: "bg-white/5 border-white/10 text-foreground/70" };
+function formatCountdown(nextJD: number | null): CountdownDisplay {
+  if (!nextJD) {
+    return { label: "—", className: "bg-white/5 border-white/10 text-foreground/70", rowStyle: undefined };
+  }
   const now = jdNow();
   const dtDays = nextJD - now;
   // Extremely soon

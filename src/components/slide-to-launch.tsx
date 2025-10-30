@@ -18,7 +18,7 @@ export function SlideToLaunch({ onComplete, className = "" }: SlideToLaunchProps
   const x = useMotionValue(0);
   const [maxX, setMaxX] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [isComplete, setIsComplete] = useState(false);
+  const [, setIsComplete] = useState(false);
 
   const stopAnimation = useCallback(() => {
     animationRef.current?.stop();
@@ -134,8 +134,10 @@ export function SlideToLaunch({ onComplete, className = "" }: SlideToLaunchProps
     };
   }, [progress]);
 
+  const containerClasses = "relative z-10 flex w-full items-center";
+
   return (
-    <div className="relative z-10 flex w-full items-center">
+    <div className={className ? `${containerClasses} ${className}` : containerClasses}>
       <div
         ref={trackRef}
         className="relative flex h-11 w-full items-center overflow-visible rounded-full border border-cyan-400/40 bg-black/45 px-1.5 shadow-[0_0_24px_rgba(56,189,248,0.22)] backdrop-blur"
