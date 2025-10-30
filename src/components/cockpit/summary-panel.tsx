@@ -54,7 +54,7 @@ type FlybyWindow = {
   to: FlybyRow;
 };
 
-const FAL_AUDIO_URL = "https://fra.cloud.appwrite.io/v1/storage/buckets/summaryImages/files/falFemale/view?project=68ea4bc00031046d613e&mode=admin";
+const FAL_AUDIO_URL = "https://fra.cloud.appwrite.io/v1/storage/buckets/summaryImages/files/falFemale/view?project=68ea4bc00031046d613e";
 
 function Spinner() {
   return (
@@ -795,8 +795,22 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
 
   const falAudioRef = useRef<HTMLAudioElement | null>(null);
   const falAudioCleanupRef = useRef<(() => void) | null>(null);
+  const falAudioUnlockedRef = useRef(false);
   const [isFalAudioPlaying, setIsFalAudioPlaying] = useState(false);
   const [isFalAudioLoading, setIsFalAudioLoading] = useState(false);
+  const [falAudioError, setFalAudioError] = useState<string | null>(null);
+
+  const describePlaybackError = useCallback((err: unknown) => {
+    if (err instanceof DOMException) {
+      return err.message ? `${err.name}: ${err.message}` : err.name;
+    }
+    if (err instanceof Error) {
+      return err.message;
+    }
+    if (typeof err === "string") return err;
+    return String(err ?? "unknown error");
+  }, []);
+
 
   const ensureFalAudio = useCallback(() => {
     if (falAudioRef.current) return falAudioRef.current;
@@ -809,10 +823,15 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     const audio = new Audio(FAL_AUDIO_URL);
     audio.preload = "auto";
     audio.loop = false;
+    // @ts-expect-error playsInline exists on HTMLMediaElement in supporting browsers
+    audio.playsInline = true;
 
     const handlePlaying = () => {
       setIsFalAudioLoading(false);
       setIsFalAudioPlaying(true);
+      setFalAudioError(null);
+      audio.muted = false;
+      audio.volume = 1;
     };
     const handlePause = () => {
       setIsFalAudioLoading(false);
@@ -843,7 +862,7 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
 
     falAudioRef.current = audio;
     return audio;
-  }, []);
+  }, [setFalAudioError, setIsFalAudioLoading, setIsFalAudioPlaying]);
 
   const handleFalAudioToggle = useCallback(() => {
     const audio = ensureFalAudio();
@@ -852,6 +871,7 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
     if (!audio.paused && !audio.ended) {
       setIsFalAudioLoading(false);
       setIsFalAudioPlaying(false);
+      setFalAudioError(null);
       audio.pause();
       audio.currentTime = 0;
       return;
@@ -859,11 +879,36 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
 
     setIsFalAudioLoading(true);
     audio.currentTime = 0;
-    audio.play().catch(() => {
+    setFalAudioError(null);
+    audio.muted = true;
+    audio.volume = 1;
+    const start = audio.play();
+
+    const onSuccess = () => {
+      window.setTimeout(() => {
+        audio.muted = false;
+      }, 40);
+    };
+
+    const onFailure = (err?: unknown) => {
+      audio.pause();
+      audio.currentTime = 0;
+      audio.muted = false;
+      audio.volume = 1;
       setIsFalAudioLoading(false);
       setIsFalAudioPlaying(false);
-    });
-  }, [ensureFalAudio]);
+      if (err) {
+        console.error("[FAL] play() failed", err);
+      }
+      setFalAudioError(`Audio playback failed: ${describePlaybackError(err)}`);
+    };
+
+    if (start && typeof start.then === "function") {
+      start.then(onSuccess).catch((err) => onFailure(err));
+    } else {
+      onSuccess();
+    }
+  }, [describePlaybackError, ensureFalAudio, setFalAudioError, setIsFalAudioLoading, setIsFalAudioPlaying]);
 
   useEffect(() => {
     return () => {
@@ -878,6 +923,41 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (falAudioUnlockedRef.current) return;
+    if (typeof window === "undefined") return;
+
+    const unlock = () => {
+      if (falAudioUnlockedRef.current) return;
+      const audio = ensureFalAudio();
+      if (!audio) return;
+      falAudioUnlockedRef.current = true;
+      audio.muted = true;
+      const reset = () => {
+        try {
+          audio.pause();
+          audio.currentTime = 0;
+        } catch {
+          // ignore
+        }
+        audio.muted = false;
+      };
+      const playPromise = audio.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise.then(reset).catch(reset);
+      } else {
+        reset();
+      }
+    };
+
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [ensureFalAudio]);
 
   // Persist selected window per comet
   useEffect(() => {
@@ -1023,12 +1103,16 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
             }}
             disabled={isFalAudioLoading}
             aria-label={isFalAudioPlaying ? "Pause FAL audio" : "Play FAL audio"}
-            className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-red-400/40 bg-slate-950/80 text-red-200/85 shadow-[0_0_10px_rgba(248,113,113,0.4)] transition hover:text-red-100 hover:border-red-300/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70 ${
-              isFalAudioLoading ? "opacity-70" : ""
-            }`}
+            className={`inline-flex h-6 w-6 items-center justify-center rounded-full border border-red-400/40 bg-slate-950/80 text-red-200/85 shadow-[0_0_10px_rgba(248,113,113,0.4)] transition hover:text-red-100 hover:border-red-300/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-300/70 ${isFalAudioLoading ? "opacity-70" : ""
+              }`}
           >
             {isFalAudioPlaying ? <PauseIcon /> : <PlayIcon />}
           </button>
+          {falAudioError ? (
+            <span className="text-[11px] text-red-300/80" role="status" aria-live="polite">
+              {falAudioError}
+            </span>
+          ) : null}
         </div>
 
         <div className="flex w-full max-w-[18rem] justify-center sm:max-w-[20rem]">
@@ -1083,9 +1167,8 @@ export function SummaryFlybyPanel({ className = "" }: { className?: string }) {
                   aria-label={`Select window ${dotIndex + 1}${hasSummary ? " – briefing ready" : " – no briefing yet"}`}
                 >
                   <span
-                    className={`block h-2.5 w-2.5 rounded-full transition-all duration-200 ${glowClasses} ${
-                      dotSelected ? "scale-125" : "opacity-70 group-hover:opacity-100"
-                    }`}
+                    className={`block h-2.5 w-2.5 rounded-full transition-all duration-200 ${glowClasses} ${dotSelected ? "scale-125" : "opacity-70 group-hover:opacity-100"
+                      }`}
                   />
                 </button>
               );

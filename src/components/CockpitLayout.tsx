@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { Switch } from "@/components/ui/switch";
 import SummaryProvider, {
@@ -12,6 +12,20 @@ import SummaryProvider, {
 
 type CockpitLayoutProps = {
   children?: ReactNode;
+};
+
+const AMBIENCE_AUDIO_SRC =
+  "https://fra.cloud.appwrite.io/v1/storage/buckets/summaryImages/files/ambienceV1/view?project=68ea4bc00031046d613e";
+const AMBIENCE_CROSS_FADE_SEC = 4;
+
+const describePlaybackError = (err: unknown) => {
+  if (err instanceof DOMException) {
+    return err.message ? `${err.name}: ${err.message}` : err.name;
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return typeof err === "string" ? err : String(err ?? "unknown error");
 };
 
 export function CockpitLayout({ children }: CockpitLayoutProps) {
@@ -30,6 +44,7 @@ function MainView({ children }: { children?: ReactNode }) {
   // Desktop layout uses a fixed 3x2 cell grid; mobile stacks panels.
   const { orientation } = useSummaryLayoutInfo();
   const [muted, setMuted] = useState(true);
+  const [ambientError, setAmbientError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Cross-fading loop implementation using two audio elements.
@@ -41,160 +56,279 @@ function MainView({ children }: { children?: ReactNode }) {
     raf?: number;
   };
   const loopRef = useRef<LoopState | null>(null);
+  const ambientUnlockedRef = useRef(false);
+
+  const ensureAmbientLoop = useCallback((): LoopState | null => {
+    if (!AMBIENCE_AUDIO_SRC) return null;
+    let state = loopRef.current;
+    if (state) return state;
+
+    const a1 = new Audio(AMBIENCE_AUDIO_SRC);
+    const a2 = new Audio(AMBIENCE_AUDIO_SRC);
+    [a1, a2].forEach((a) => {
+      a.preload = "auto";
+      a.loop = false; // we manage looping manually for crossfade
+      a.volume = 0;
+      a.muted = false;
+      // Hint Chrome to allow inline playback without fullscreen requirements
+      // @ts-expect-error playsInline exists on HTMLMediaElement in supporting browsers
+      a.playsInline = true;
+    });
+
+    state = { audios: [a1, a2], current: 0 };
+    loopRef.current = state;
+    return state;
+  }, []);
+
+  const clearAmbientLoopTimers = useCallback(() => {
+    const state = loopRef.current;
+    if (!state) return;
+    if (state.nextTimer) {
+      window.clearTimeout(state.nextTimer);
+      state.nextTimer = undefined;
+    }
+    if (state.raf) {
+      cancelAnimationFrame(state.raf);
+      state.raf = undefined;
+    }
+  }, []);
+
+  const pauseAmbientLoop = useCallback(() => {
+    const state = loopRef.current;
+    if (!state) return;
+    state.audios.forEach((a) => {
+      try {
+        a.pause();
+        a.currentTime = 0;
+      } catch {
+        // ignore pause failures
+      }
+    });
+  }, []);
+
+  const silenceAmbientLoop = useCallback(() => {
+    const state = loopRef.current;
+    if (!state) return;
+    state.audios.forEach((a) => {
+      a.muted = true;
+      a.volume = 0;
+    });
+  }, []);
+
+  const disposeAmbientLoop = useCallback(() => {
+    const state = loopRef.current;
+    if (!state) return;
+    clearAmbientLoopTimers();
+    pauseAmbientLoop();
+    state.audios.forEach((a) => {
+      try {
+        a.src = "";
+      } catch {
+        // ignore
+      }
+    });
+    loopRef.current = null;
+  }, [clearAmbientLoopTimers, pauseAmbientLoop]);
+
+  const handleAmbientToggle = useCallback(
+    (checked: boolean) => {
+      const state = ensureAmbientLoop();
+      if (!state) {
+        setAmbientError("Ambience unavailable.");
+        return;
+      }
+
+      if (checked) {
+        // Prime playback if needed (muted so Chrome allows it).
+        state.audios.forEach((audio) => {
+          if (audio.paused) {
+            audio.muted = true;
+            audio.volume = 0;
+            const playPromise = audio.play();
+            if (playPromise && typeof playPromise.then === "function") {
+              playPromise.catch((err) => {
+                console.error("[ambience] play() failed", err);
+                setAmbientError(`Audio playback failed: ${describePlaybackError(err)}`);
+              });
+            }
+          }
+        });
+
+        // Make current track audible.
+        const current = state.audios[state.current];
+        current.muted = false;
+        current.volume = 1;
+        setAmbientError(null);
+        setMuted(false);
+      } else {
+        clearAmbientLoopTimers();
+        silenceAmbientLoop();
+        setAmbientError(null);
+        setMuted(true);
+      }
+    },
+    [clearAmbientLoopTimers, ensureAmbientLoop, silenceAmbientLoop]
+  );
 
   useEffect(() => {
     return () => {
-      const s = loopRef.current;
-      if (s) {
-        if (s.nextTimer) window.clearTimeout(s.nextTimer);
-        if (s.raf) cancelAnimationFrame(s.raf);
-        s.audios.forEach((a) => {
-          try {
-            a.pause();
-            a.src = "";
-          } catch { }
-        });
-        loopRef.current = null;
-      }
+      disposeAmbientLoop();
       // Also clean up legacy single audioRef if it was used
       const legacy = audioRef.current;
       if (legacy) {
         try {
           legacy.pause();
-        } catch { }
+        } catch {
+          // ignore
+        }
         audioRef.current = null;
       }
     };
-  }, []);
+  }, [disposeAmbientLoop]);
 
   useEffect(() => {
-    const src =
-      "https://fra.cloud.appwrite.io/v1/storage/buckets/summaryImages/files/ambienceV1/view?project=68ea4bc00031046d613e&mode=admin";
-    if (!src) return;
+    if (ambientUnlockedRef.current) return;
+    if (typeof window === "undefined") return;
 
-    const CROSS_FADE_SEC = 4;
+    const unlock = () => {
+      if (ambientUnlockedRef.current) return;
+      ambientUnlockedRef.current = true;
+      const state = ensureAmbientLoop();
+      if (!state) return;
+      state.audios.forEach((audio) => {
+        audio.muted = true;
+        audio.volume = 0;
+        const playPromise = audio.play();
+        if (playPromise && typeof playPromise.catch === "function") {
+          playPromise.catch((err) => {
+            console.warn("[ambience] unlock play failed", err);
+          });
+        }
+      });
+    };
 
-    // stop + reset if muted
+    window.addEventListener("pointerdown", unlock, { once: true });
+    window.addEventListener("keydown", unlock, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [ensureAmbientLoop]);
+
+  useEffect(() => {
     if (muted) {
-      const s = loopRef.current;
-      if (s) {
-        if (s.nextTimer) window.clearTimeout(s.nextTimer);
-        if (s.raf) cancelAnimationFrame(s.raf);
-        s.audios.forEach((a) => {
-          try {
-            a.pause();
-            a.currentTime = 0;
-          } catch { }
-        });
-      }
+      clearAmbientLoopTimers();
+      silenceAmbientLoop();
       return;
     }
 
-    // ensure loopRef exists
-    let s = loopRef.current;
-    if (!s) {
-      const a1 = new Audio(src);
-      const a2 = new Audio(src);
-      [a1, a2].forEach((a) => {
-        a.preload = "auto";
-        a.loop = false; // we manage looping manually for crossfade
-        a.volume = 0;
-        a.muted = false;
-      });
-      loopRef.current = { audios: [a1, a2], current: 0 };
-      s = loopRef.current;
-    }
+    const state = ensureAmbientLoop();
+    if (!state) return;
 
     let cancelled = false;
 
     const scheduleNext = (currentIdx: 0 | 1) => {
       if (cancelled) return;
-      const current = s!.audios[currentIdx];
-      const other = s!.audios[1 - currentIdx];
+      const current = state.audios[currentIdx];
+      const other = state.audios[1 - currentIdx];
 
       const trySchedule = () => {
         const duration = current.duration || 0;
         if (!isFinite(duration) || duration <= 0) return;
-        // delay until we should start other (ms)
-        const delay = Math.max((duration - CROSS_FADE_SEC - current.currentTime) * 1000, 0);
-        if (s!.nextTimer) window.clearTimeout(s!.nextTimer);
-        s!.nextTimer = window.setTimeout(() => {
-          // start other and crossfade
+        const delay = Math.max(
+          (duration - AMBIENCE_CROSS_FADE_SEC - current.currentTime) * 1000,
+          0
+        );
+        if (state.nextTimer) window.clearTimeout(state.nextTimer);
+        state.nextTimer = window.setTimeout(() => {
           other.currentTime = 0;
           other.volume = 0;
-          void other.play().catch(() => {
-            // autoplay blocked / problem -> mute control
-            setMuted(true);
-          });
+          other.muted = false;
+          const playPromise = other.play();
+          if (playPromise && typeof playPromise.catch === "function") {
+            playPromise.catch((err) => {
+              console.error("[ambience] crossfade play() failed", err);
+              clearAmbientLoopTimers();
+              silenceAmbientLoop();
+              setAmbientError(`Audio playback failed: ${describePlaybackError(err)}`);
+              setMuted(true);
+            });
+          }
 
-          const startTime = performance.now();
-          const fade = () => {
-            const t = (performance.now() - startTime) / (CROSS_FADE_SEC * 1000);
+          const fadeStart = performance.now();
+          const fade = (ts: number) => {
+            if (cancelled) return;
+            const elapsed = (ts - fadeStart) / 1000;
+            const t = Math.min(1, Math.max(0, elapsed / AMBIENCE_CROSS_FADE_SEC));
             if (t >= 1) {
               current.volume = 0;
+              current.muted = true;
               other.volume = 1;
               try {
-                current.pause();
                 current.currentTime = 0;
-              } catch { }
-              s!.current = (1 - currentIdx) as 0 | 1;
-              // schedule the next crossfade when the now-current has metadata
-              scheduleNext(s!.current);
+              } catch {
+                // ignore
+              }
+              state.current = (1 - currentIdx) as 0 | 1;
+              scheduleNext(state.current);
               return;
             }
             current.volume = Math.max(0, 1 - t);
             other.volume = Math.min(1, t);
-            s!.raf = requestAnimationFrame(fade);
+            state.raf = requestAnimationFrame(fade);
           };
-          s!.raf = requestAnimationFrame(fade);
+          state.raf = requestAnimationFrame(fade);
         }, delay);
       };
 
-      // if we don't know duration yet, listen for loadedmetadata on current
       if (!current.duration || !isFinite(current.duration) || current.duration <= 0) {
         const onMeta = () => {
           if (!cancelled) trySchedule();
         };
         current.addEventListener("loadedmetadata", onMeta, { once: true });
-        // also try immediately in case duration is already available
         trySchedule();
       } else {
         trySchedule();
       }
     };
 
-    // start playback on the current audio if needed
-    const curIdx = s.current;
-    const cur = s.audios[curIdx];
+    const curIdx = state.current;
+    const cur = state.audios[curIdx];
     if (cur.paused) {
       cur.volume = 1;
       cur.currentTime = 0;
-      void cur
-        .play()
-        .then(() => {
-          // schedule based on metadata / duration
-          scheduleNext(curIdx);
-        })
-        .catch(() => {
-          setMuted(true);
-        });
+      const playPromise = cur.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise
+          .then(() => {
+            scheduleNext(curIdx);
+          })
+          .catch((err) => {
+            console.error("[ambience] initial play() failed", err);
+            clearAmbientLoopTimers();
+            silenceAmbientLoop();
+            setAmbientError(`Audio playback failed: ${describePlaybackError(err)}`);
+            setMuted(true);
+          });
+      } else {
+        scheduleNext(curIdx);
+      }
     } else {
-      // already playing (edge cases), ensure schedule is present
       scheduleNext(curIdx);
     }
 
     return () => {
       cancelled = true;
-      if (s!.nextTimer) {
-        window.clearTimeout(s!.nextTimer);
-        s!.nextTimer = undefined;
+      if (state.nextTimer) {
+        window.clearTimeout(state.nextTimer);
+        state.nextTimer = undefined;
       }
-      if (s!.raf) {
-        cancelAnimationFrame(s!.raf);
-        s!.raf = undefined;
+      if (state.raf) {
+        cancelAnimationFrame(state.raf);
+        state.raf = undefined;
       }
     };
-  }, [muted]);
+  }, [clearAmbientLoopTimers, ensureAmbientLoop, muted, silenceAmbientLoop]);
 
   return (
     <div className="flex flex-col gap-6 lg:flex-1 lg:min-h-0">
@@ -215,11 +349,18 @@ function MainView({ children }: { children?: ReactNode }) {
               <span>Ambience</span>
               <Switch
                 checked={!muted}
-                onCheckedChange={(checked) => setMuted(!checked)}
+                onCheckedChange={(checked) => {
+                  handleAmbientToggle(checked);
+                }}
                 aria-label="Toggle ambience audio"
               />
             </div>
           </div>
+          {ambientError ? (
+            <div className="text-[11px] text-red-300/80" role="status" aria-live="polite">
+              {ambientError}
+            </div>
+          ) : null}
         </div>
         <div className="hidden items-center justify-between sm:flex">
           <div className="flex items-center gap-4 text-xs uppercase tracking-[0.35em] text-cyan-200/80">
@@ -231,7 +372,9 @@ function MainView({ children }: { children?: ReactNode }) {
               <span>Ambience</span>
               <Switch
                 checked={!muted}
-                onCheckedChange={(checked) => setMuted(!checked)}
+                onCheckedChange={(checked) => {
+                  handleAmbientToggle(checked);
+                }}
                 aria-label="Toggle ambience audio"
               />
             </div>
@@ -242,6 +385,11 @@ function MainView({ children }: { children?: ReactNode }) {
               Exit
             </Link>
           </div>
+          {ambientError ? (
+            <div className="text-right text-[11px] text-red-300/80" role="status" aria-live="polite">
+              {ambientError}
+            </div>
+          ) : null}
         </div>
       </header>
 
