@@ -6,6 +6,7 @@ import { throwIfMissing, coerceNumber, extractRelationId } from "./utils.js";
 
 type HandlerRequest = {
     method: string;
+    headers?: Record<string, string | undefined>;
     json: () => Promise<unknown>;
     bodyJson?: unknown;
     bodyText?: string;
