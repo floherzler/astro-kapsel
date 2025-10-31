@@ -133,6 +133,37 @@ type ExecutionWithExtras = Models.Execution & {
   result?: unknown;
 };
 
+function formatCometLabelFromPayload(row: Partial<CometRow> | undefined): string | null {
+  if (!row) return null;
+  const name = row.name?.trim();
+  const designation = row.designation?.trim();
+  if (name && designation && name !== designation) return `${name} · ${designation}`;
+  return name ?? designation ?? null;
+}
+
+async function pollExecutionCompletion(
+  functions: Functions,
+  functionId: string,
+  executionId: string,
+  initial: Models.Execution,
+  logUpdate?: (status: string) => void
+): Promise<ExecutionWithExtras> {
+  let current = initial as ExecutionWithExtras;
+  const terminal = new Set(["completed", "failed", "errored", "cancelled", "aborted"]);
+  const maxAttempts = 12;
+  const delayMs = 1000;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (terminal.has((current.status ?? "").toLowerCase())) {
+      return current;
+    }
+    logUpdate?.(current.status ?? "waiting");
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+    current = (await functions.getExecution(functionId, executionId)) as ExecutionWithExtras;
+  }
+  return current;
+}
+
 function coerceFiniteNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string") {
@@ -506,7 +537,13 @@ export default function CometList({
       const functionId = "addComet";
       if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
 
-      const exec = await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) });
+      let exec = (await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) })) as ExecutionWithExtras;
+      if (exec.status !== "completed") {
+        setSubmitMsg(`Execution status: ${exec.status}. Processing…`);
+        exec = await pollExecutionCompletion(functions, functionId, exec.$id, exec, (status) => {
+          setSubmitMsg(`Execution status: ${status}. Processing…`);
+        });
+      }
       if (exec.status !== "completed") {
         setSubmitMsg(`Execution status: ${exec.status}`);
         setSuggestions([]);
@@ -542,10 +579,14 @@ export default function CometList({
         setAddNotice(null);
         setSuggestions(multiMatch ? (parsed!.suggestions as CometSuggestion[]) : []);
       } else {
+        const addedComet = parsed?.comet as Partial<CometRow> | undefined;
+        const cometLabel = formatCometLabelFromPayload(addedComet);
         const successMsg =
           parsedMessage && parsedMessage.length > 0
             ? parsedMessage
-            : "☄️ Comet request queued";
+            : cometLabel
+              ? `☄️ ${cometLabel} ready for the cockpit`
+              : "☄️ Comet added successfully";
         setSubmitMsg(successMsg);
         setBlast(true);
         setTimeout(() => setBlast(false), 1200);
