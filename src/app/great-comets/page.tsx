@@ -254,17 +254,46 @@ export default function GreatCometsPage() {
       };
       if (perihelionJD != null) payload.perihelionJD = perihelionJD;
 
-      const execution = await functions.createExecution({
+      let exec = (await functions.createExecution({
         functionId,
         body: JSON.stringify(payload),
-      });
+      })) as unknown as Record<string, unknown> & { $id?: string; status?: string };
 
-      const output = getExecutionOutput(execution);
-      if (execution.status !== "completed") {
-        setStatusMessage(`Function status: ${execution.status}`);
+      // If the function is asynchronous, poll its execution until a terminal state
+      // so we can give the user accurate feedback and refresh the sightings list.
+      const terminal = new Set(["completed", "failed", "errored", "cancelled", "aborted"]);
+      const maxAttempts = 12;
+      const delayMs = 1000;
+
+      if (!terminal.has(((exec.status ?? "") as string).toLowerCase())) {
+        setStatusMessage(`Execution status: ${String(exec.status ?? "pending")}. Processing…`);
+        for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+          // wait then fetch latest execution
+          await new Promise((res) => setTimeout(res, delayMs));
+          try {
+            if (typeof exec.$id === "string") {
+              // functions.getExecution(functionId, executionId)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const latest = (await (functions as any).getExecution(functionId, exec.$id)) as any;
+              if (latest) exec = latest;
+            }
+          } catch (e) {
+            // ignore intermittent errors and continue polling
+            console.warn("Polling execution failed", e);
+          }
+          setStatusMessage(`Execution status: ${String(exec.status ?? "waiting")} ${attempt < maxAttempts - 1 ? "…" : ""}`);
+          if (terminal.has(((exec.status ?? "") as string).toLowerCase())) break;
+        }
+      }
+
+      // Final execution record
+      const finalExec = exec as Record<string, unknown> & { status?: string };
+      if (((finalExec.status ?? "") as string).toLowerCase() !== "completed") {
+        setStatusMessage(`Execution finished with status: ${String(finalExec.status ?? "unknown")}`);
         return;
       }
 
+      const output = getExecutionOutput(finalExec as any);
       if (output) {
         try {
           const parsed = JSON.parse(output) as { ok?: boolean; message?: string; error?: string } | undefined;
@@ -274,7 +303,7 @@ export default function GreatCometsPage() {
             setStatusMessage(parsed?.error || parsed?.message || "Sighting generated.");
           }
         } catch {
-          setStatusMessage(output);
+          setStatusMessage(String(output));
         }
       } else {
         setStatusMessage("Sighting requested. Refreshing log…");
