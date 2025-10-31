@@ -286,7 +286,7 @@ export default function GreatCometsPage() {
     } finally {
       setGenerating(false);
     }
-  }, [selectedCometId, perihelionDate, functions, functionId, loadSightings]);
+  }, [selectedCometId, perihelionDate, perihelionJD, functions, functionId, loadSightings]);
 
   return (
     <div className="relative min-h-dvh">

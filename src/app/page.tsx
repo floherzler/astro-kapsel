@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import OrbitView3D from "@/components/orbit-view-3d";
@@ -125,21 +124,7 @@ const GREAT_COMETS_REFERENCE = [
   },
 ] as const;
 
-const HEARTBEAT_FLEET = [
-  { designation: "P · 1P", name: "Halley", cadence: "~76-year return" },
-  { designation: "P · 2P", name: "Encke", cadence: "~3.3-year sprint" },
-  { designation: "P · 4P", name: "Faye", cadence: "~7.6-year cadence" },
-  { designation: "P · 9P", name: "Tempel 1", cadence: "~5.5-year rhythm" },
-  { designation: "P · 67P", name: "Churyumov–Gerasimenko", cadence: "~6.45-year duet" },
-] as const;
-
-const SPIKES_OF_WONDER = [
-  { designation: "C · C/1577 V1", name: "Tycho’s Comet", year: "1577" },
-  { designation: "C · C/1882 R1", name: "Great September Comet", year: "1882" },
-  { designation: "C · C/1965 S1", name: "Ikeya–Seki", year: "1965" },
-  { designation: "C · C/1995 O1", name: "Hale-Bopp", year: "1997" },
-  { designation: "C · C/2020 F3", name: "NEOWISE", year: "2020" },
-] as const;
+// (Removed unused constants HEARTBEAT_FLEET and SPIKES_OF_WONDER)
 
 const FLEET_TABS = [
   { key: "p", label: "P-Type", empty: "No periodic comets tracked yet. Add a P-designation to begin your fleet." },
@@ -611,7 +596,7 @@ function categoriseComets(rows: HomeCometRow[]): CategorisedComets {
 
 export default function Home() {
   // Share visible IDs between list and 3D orbits
-  const [visibleCometIds, setVisibleCometIds] = useState<string[] | null>(null);
+  const [visibleCometIds, _setVisibleCometIds] = useState<string[] | null>(null);
   const router = useRouter();
   const launchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tables = useMemo(() => new TablesDB(client), []);
@@ -620,7 +605,7 @@ export default function Home() {
   const [catalog, setCatalog] = useState<HomeCometRow[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [briefingStatus, setBriefingStatus] = useState<string | null>(null);
+  const [_briefingStatus, _setBriefingStatus] = useState<string | null>(null);
   const [classificationOpen, setClassificationOpen] = useState(false);
   const [airlockActive, setAirlockActive] = useState(false);
   const [fleetTab, setFleetTab] = useState<FleetTabKey>("p");
@@ -741,9 +726,7 @@ export default function Home() {
       airlockTimerRef.current = null;
     }, 900);
   }, [router]);
-  const goToCockpit = useCallback(() => {
-    router.push("/cockpit");
-  }, [router]);
+  // goToCockpit removed (unused) — use direct router.push where needed
   const goToGreatComets = useCallback(() => {
     router.push("/great-comets");
   }, [router]);
@@ -992,7 +975,7 @@ export default function Home() {
             </div>
           </div>
           {/* <div className="mt-4 rounded-2xl border border-white/10 bg-[#061025]/85 p-3"> */}
-          <OrbitView3D {...({ onlyIds: visibleCometIds ?? undefined, filterMode: orbitFilter } as any)} />
+          <OrbitView3D onlyIds={visibleCometIds ?? undefined} filterMode={orbitFilter} />
           {/* </div> */}
         </section>
 

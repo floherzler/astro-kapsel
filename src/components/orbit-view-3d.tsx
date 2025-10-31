@@ -137,7 +137,8 @@ export default function OrbitView3D({
   const [tooltip, setTooltip] = useState<null | { label: string; x: number; y: number }>(null);
   const [showPlanets, setShowPlanets] = useState(true);
   const [showKuiper, setShowKuiper] = useState(true);
-  const [showAsteroids, setShowAsteroids] = useState(false);
+  // setter intentionally unused for now; keep state value for future toggles
+  const [showAsteroids] = useState(false);
   const sunRef = useRef<THREE.Object3D | null>(null);
 
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
