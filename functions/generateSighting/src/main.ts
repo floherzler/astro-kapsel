@@ -178,7 +178,7 @@ function buildPrompt(params: {
         `Describe naked-eye appearance using measurable details (brightness in approximate magnitude, tail length, direction, colour, time of day).`,
         `Summarise how specific communities responded (scientists, newspapers, artists, religious leaders) using verifiable language. If records are sparse, state the uncertainty—do not invent dramatic events.`,
         `Tone: accessible to non-specialists, precise, and neutral. 160–220 words, plain sentences.`,
-        `Return STRICT JSON with keys: observer_name (string), note (string), geo_lat (number or null), geo_lon (number or null), location_hint (string).`,
+        `Return STRICT JSON OBJECT (not an array) with keys: observer_name (string), note (string), geo_lat (number or null), geo_lon (number or null), location_hint (string).`,
         `If coordinates are unknown, set geo_lat and geo_lon to null. Use decimal degrees if you provide them.`,
     ];
     if (location) instructions.push(`Suggested location context: ${location}.`);
@@ -223,7 +223,11 @@ function parseSightingOutput(raw: string): {
         else content = content.replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
     }
     try {
-        const parsed = JSON.parse(content);
+        let parsed: any = JSON.parse(content);
+        if (Array.isArray(parsed)) {
+            parsed = parsed.find((entry) => entry && typeof entry === "object") ?? parsed[0] ?? null;
+        }
+        if (!parsed || typeof parsed !== "object") return {};
         const observerName = typeof parsed?.observer_name === "string" && parsed.observer_name.trim().length > 0
             ? parsed.observer_name.trim()
             : undefined;
@@ -532,6 +536,7 @@ export default async function handler(ctx: HandlerContext) {
             geoLat,
             geoLon,
             locationHint,
+            raw: generation.raw.length > 400 ? `${generation.raw.slice(0, 397)}...` : generation.raw,
         });
 
         const flybyIdValue = flyby?.$id;
@@ -568,6 +573,7 @@ export default async function handler(ctx: HandlerContext) {
                 locationHint,
                 requestId: generation.requestId,
                 model: generation.model,
+                raw: generation.raw,
             },
             201
         );
