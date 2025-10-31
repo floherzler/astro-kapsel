@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
@@ -774,22 +775,22 @@ export default function Home() {
   return (
     <div className="relative min-h-dvh overflow-hidden">
       <div className="starfield" />
+      {/* Decorative image removed from hero — moved into the first panel card below */}
       {airlockActive && <div className="airlock-overlay pointer-events-none fixed inset-0 z-20" />}
 
       <main className="relative z-10 mx-auto max-w-5xl px-6 py-14">
         <section className="space-y-6 rounded-[30px] border border-white/12 bg-white/5 px-6 py-8 shadow-[0_0_38px_rgba(10,18,38,0.5)] backdrop-blur sm:px-9">
+          {/* Image card: same width as other panels, contains the header image and visible title */}
+          <div className="rounded-2xl border border-white/10 bg-[#061025]/80 overflow-hidden">
+            <div className="relative h-64 sm:h-80 md:h-96 lg:h-[28rem] w-full">
+              <Image src="/img/astroKapsel.png" alt="astroKapsel" fill className="object-cover object-center" priority />
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/20 pointer-events-none" />
+            </div>
+          </div>
+          {/* Accessible page title (hidden visually) */}
+          <h1 className="sr-only">astroKapsel</h1>
+
           <div className="space-y-4">
-            <h1 className="text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-              astroKapsel by{" "}
-              <a
-                href="https://github.com/floherzler/astro-kapsel"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-emerald-200 underline decoration-emerald-400/50 underline-offset-4 transition hover:text-emerald-100 hover:decoration-emerald-300"
-              >
-                @floherzler
-              </a>
-            </h1>
             <p className="text-sm text-foreground/75">
               astroKapsel couples NASA Small-Body Database telemetry with your field notes so you can compare recurring comets with rare visitors in one scientific workspace.
             </p>
