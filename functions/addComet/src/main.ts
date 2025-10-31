@@ -89,7 +89,11 @@ export default async ({ req, res, log, error }: any) => {
         const raw = await response.text();
         let nasaData: any;
         try { nasaData = JSON.parse(raw); }
-        catch { return res.json({ success: false, error: "Invalid NASA response", details: raw }, 502); }
+        catch {
+            log(`[addComet] NASA response could not be parsed for "${cometID}"`);
+            return res.json({ success: false, error: "Invalid NASA response", details: raw }, 502);
+        }
+        log(`[addComet] NASA status ${response.status} ${response.statusText}`);
 
         // Multiple candidates (HTTP 300 or 200 with list but no object)
         if ((response.status === 300 || (nasaData?.list && !nasaData?.object)) && Array.isArray(nasaData.list)) {
@@ -108,11 +112,13 @@ export default async ({ req, res, log, error }: any) => {
         }
 
         if (!response.ok || !nasaData?.object?.fullname) {
+            const message = extractNasaMessage(nasaData) ?? `Specified object not found (${cometID})`;
+            log(`[addComet] NASA lookup failed: ${message}`);
             return res.json({
                 success: false,
-                error: extractNasaMessage(nasaData) ?? `Not found for "${cometID}"`,
+                error: message,
                 details: nasaData
-            }, response.status || 404);
+            }, response.status === 200 ? 404 : response.status || 404);
         }
 
         // --- Extract orbital elements ---
@@ -205,6 +211,7 @@ export default async ({ req, res, log, error }: any) => {
             }
         }
 
+        log(`[addComet] inserted comet ${cometRow.$id}`);
         return res.json({ success: true, comet: cometRow }, 201);
 
     } catch (e: any) {
