@@ -360,7 +360,10 @@ export default async function handler(ctx: HandlerContext) {
     const project =
         process.env.APPWRITE_FUNCTION_PROJECT_ID ||
         process.env.APPWRITE_PROJECT_ID;
-    const apiKey = process.env.APPWRITE_API_KEY;
+    const apiKey =
+        req.headers?.["x-appwrite-key"] ??
+        process.env.APPWRITE_API_KEY ??
+        process.env.APPWRITE_FUNCTION_API_KEY;
 
     if (!endpoint || !project) {
         return res.json(
