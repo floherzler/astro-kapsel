@@ -362,10 +362,13 @@ export default async function handler(ctx: HandlerContext) {
     const tables = new TablesDB(client);
 
     try {
+        log("[generateSighting] payload normalized", normalized);
+
         let cometId = normalized.cometId;
         let flyby: FlybyRow | null = null;
 
         if (normalized.flybyId) {
+            log(`[generateSighting] fetching provided flyby ${normalized.flybyId}`);
             flyby = await getFlyby(ctx, tables, {
                 databaseId,
                 tableId: tableFlybys,
@@ -373,11 +376,13 @@ export default async function handler(ctx: HandlerContext) {
             });
 
             if (!flyby) {
+                log("[generateSighting] flyby lookup failed");
                 return res.json({ ok: false, error: "Flyby not found." }, 404);
             }
 
             const relationId = extractRelationId(flyby.comet);
             if (!relationId) {
+                log("[generateSighting] flyby missing comet relation");
                 return res.json({ ok: false, error: "Flyby is missing comet relation." }, 400);
             }
             if (relationId !== cometId) {
@@ -395,11 +400,14 @@ export default async function handler(ctx: HandlerContext) {
         });
 
         if (!comet) {
+            log("[generateSighting] comet not found");
             return res.json({ ok: false, error: "Comet not found." }, 404);
         }
+        log("[generateSighting] comet retrieved", { cometId, prefix: comet.prefix, name: comet.name });
 
         const prefix = (comet.prefix ?? "").toString().toUpperCase();
         if (prefix !== "C") {
+            log("[generateSighting] comet prefix not C", { cometId, prefix });
             return res.json(
                 {
                     ok: false,
@@ -414,12 +422,14 @@ export default async function handler(ctx: HandlerContext) {
         if (!flyby) {
             const perihelionDate = jdToDate(comet.last_perihelion_year);
             if (!perihelionDate) {
+                log("[generateSighting] missing perihelion data");
                 return res.json(
                     { ok: false, error: "Comet is missing perihelion timing data." },
                     400
                 );
             }
             year = perihelionDate.getUTCFullYear();
+            log("[generateSighting] derived perihelion year", { cometId, year, date: perihelionDate.toISOString() });
             flyby = await findOrCreateFlyby({
                 tables,
                 databaseId,
@@ -427,9 +437,11 @@ export default async function handler(ctx: HandlerContext) {
                 cometId,
                 targetYear: year,
             });
+            log("[generateSighting] using flyby", { flybyId: flyby.$id, flybyYear: flyby.year });
         }
 
         if (year === null) {
+            log("[generateSighting] missing flyby year after derivation");
             return res.json(
                 { ok: false, error: "Unable to determine flyby year." },
                 400
@@ -439,6 +451,7 @@ export default async function handler(ctx: HandlerContext) {
         const falApiKey = process.env.FAL_API_KEY as string | undefined;
         ensureFalClientConfigured(falApiKey!);
 
+        log("[generateSighting] building Gemini prompt", { cometId, year, focus: normalized.focus });
         const prompt = buildPrompt({
             cometName: comet.name ?? comet.$id ?? "Great Comet",
             cometDesignation: comet.designation,
@@ -448,13 +461,17 @@ export default async function handler(ctx: HandlerContext) {
             focus: normalized.focus,
         });
 
+        log("[generateSighting] requesting text generation");
         const { note, requestId, model } = await generateText(prompt);
+        log("[generateSighting] generation complete", { requestId, model, noteLength: note.length });
 
         const flybyIdValue = flyby?.$id;
         if (!flybyIdValue) {
+            log("[generateSighting] flyby missing id on write");
             return res.json({ ok: false, error: "Flyby row missing identifier." }, 500);
         }
 
+        log("[generateSighting] creating sighting row");
         const sighting = castDocument<SightingRow>(await tables.createRow({
             databaseId,
             tableId: tableSightings,
@@ -481,6 +498,7 @@ export default async function handler(ctx: HandlerContext) {
             201
         );
     } catch (err) {
+        log("[generateSighting] error encountered", { message: (err as Error)?.message });
         error(err);
         const message = err instanceof Error ? err.message : String(err);
         return res.json({ ok: false, error: message }, 500);
