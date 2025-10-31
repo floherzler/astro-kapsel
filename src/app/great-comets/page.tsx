@@ -8,20 +8,15 @@ import client from "@/lib/appwrite";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Dropdown } from "@/components/ui/dropdown";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Dropdown } from "@/components/ui/dropdown";
+import { Textarea } from "@/components/ui/textarea";
 
 type CometRow = Models.Document & {
   name?: string | null;
   designation?: string | null;
   prefix?: string | null;
   last_perihelion_year?: number | string | null;
-};
-
-type FlybyRow = Models.Document & {
-  year?: number | string | null;
-  description?: string | null;
 };
 
 type FlybyRelation = {
@@ -62,6 +57,20 @@ function coerceNumber(value: unknown): number | null {
   return null;
 }
 
+function jdToDate(value: unknown): Date | null {
+  const numeric = coerceNumber(value);
+  if (numeric === null) return null;
+  const ms = (numeric - 2440587.5) * 86400000;
+  return new Date(ms);
+}
+
+function formatUTCDate(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 function formatCometLabel(row: { $id?: string; name?: string | null; designation?: string | null; prefix?: string | null }) {
   const name = row.name?.trim();
   const designation = row.designation?.trim();
@@ -71,13 +80,6 @@ function formatCometLabel(row: { $id?: string; name?: string | null; designation
       : name ?? designation ?? row.$id ?? "Unknown comet";
   const prefix = row.prefix?.trim();
   return prefix ? `${prefix} · ${base}` : base;
-}
-
-function formatFlybyLabel(row: FlybyRow) {
-  const year = coerceNumber(row.year);
-  const yearLabel = year != null ? Math.round(year).toString() : "Unknown year";
-  const desc = row.description?.trim();
-  return desc ? `${yearLabel} · ${desc}` : yearLabel;
 }
 
 function mapSightingRow(row: SightingRow): SightingDisplay | null {
@@ -114,7 +116,6 @@ export default function GreatCometsPage() {
 
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableComets = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || process.env.APPWRITE_TABLE_COMETS || "comets";
-  const tableFlybys = process.env.NEXT_PUBLIC_APPWRITE_TABLE_FLYBYS || process.env.APPWRITE_TABLE_FLYBYS || "flybys";
   const tableSightings = process.env.NEXT_PUBLIC_APPWRITE_TABLE_SIGHTINGS || process.env.APPWRITE_TABLE_SIGHTINGS || "sightings";
   const functionId = "generateSighting";
 
@@ -123,12 +124,6 @@ export default function GreatCometsPage() {
   const [cometsError, setCometsError] = useState<string | null>(null);
   const [selectedCometId, setSelectedCometId] = useState<string>("");
 
-  const [flybyMap, setFlybyMap] = useState<Map<string, FlybyRow[]>>(new Map());
-  const [flybysLoading, setFlybysLoading] = useState(false);
-  const [flybysError, setFlybysError] = useState<string | null>(null);
-  const [selectedFlybyId, setSelectedFlybyId] = useState<string>("");
-
-  const [observerName, setObserverName] = useState("Gemini Observation Corps");
   const [focusPrompt, setFocusPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -151,8 +146,8 @@ export default function GreatCometsPage() {
         if (cancelled) return;
         const rows = Array.isArray(res.rows) ? (res.rows as CometRow[]) : [];
         rows.sort((a, b) => {
-          const ay = coerceNumber(a.last_perihelion_year) ?? Number.NEGATIVE_INFINITY;
-          const by = coerceNumber(b.last_perihelion_year) ?? Number.NEGATIVE_INFINITY;
+          const ay = jdToDate(a.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
+          const by = jdToDate(b.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
           return by - ay;
         });
         setComets(rows);
@@ -172,59 +167,6 @@ export default function GreatCometsPage() {
       cancelled = true;
     };
   }, [tables, databaseId, tableComets]);
-
-  useEffect(() => {
-    if (!selectedCometId) return;
-    if (flybyMap.has(selectedCometId)) {
-      if (!selectedFlybyId) {
-        const existing = flybyMap.get(selectedCometId) ?? [];
-        if (existing.length > 0) setSelectedFlybyId(existing[0].$id ?? "");
-      }
-      return;
-    }
-    let cancelled = false;
-    async function loadFlybys() {
-      setFlybysLoading(true);
-      setFlybysError(null);
-      try {
-        const res = await tables.listRows({
-          databaseId,
-          tableId: tableFlybys,
-          queries: [
-            Query.equal("comet.$id", [selectedCometId]),
-            Query.orderDesc("year"),
-            Query.limit(200),
-            Query.select(["$id", "year", "description"]),
-          ],
-        });
-        if (cancelled) return;
-        const rows = Array.isArray(res.rows) ? (res.rows as FlybyRow[]) : [];
-        const sorted = rows
-          .slice()
-          .sort((a, b) => (coerceNumber(b.year) ?? Number.NEGATIVE_INFINITY) - (coerceNumber(a.year) ?? Number.NEGATIVE_INFINITY));
-        setFlybyMap((prev) => {
-          const next = new Map(prev);
-          next.set(selectedCometId, sorted);
-          return next;
-        });
-        if (sorted.length > 0) setSelectedFlybyId(sorted[0].$id ?? "");
-      } catch (err) {
-        if (cancelled) return;
-        setFlybysError(`Unable to load flybys: ${(err as Error)?.message ?? err}`);
-        setFlybyMap((prev) => {
-          const next = new Map(prev);
-          next.set(selectedCometId, []);
-          return next;
-        });
-      } finally {
-        if (!cancelled) setFlybysLoading(false);
-      }
-    }
-    loadFlybys();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCometId, selectedFlybyId, flybyMap, tables, databaseId, tableFlybys]);
 
   const loadSightings = useCallback(async () => {
     setSightingsLoading(true);
@@ -272,20 +214,24 @@ export default function GreatCometsPage() {
     loadSightings();
   }, [loadSightings]);
 
-  const currentFlybys = flybyMap.get(selectedCometId) ?? [];
-
   const cometOptions = useMemo(
     () => comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) })),
     [comets]
   );
-  const flybyOptions = useMemo(
-    () => currentFlybys.map((row) => ({ value: row.$id, label: formatFlybyLabel(row) })),
-    [currentFlybys]
+  const selectedComet = useMemo(
+    () => (selectedCometId ? comets.find((row) => row.$id === selectedCometId) ?? null : null),
+    [comets, selectedCometId]
   );
+  const perihelionDate = useMemo(() => jdToDate(selectedComet?.last_perihelion_year), [selectedComet]);
+  const perihelionLabel = perihelionDate ? formatUTCDate(perihelionDate) : null;
 
   const handleGenerate = useCallback(async () => {
-    if (!selectedCometId || !selectedFlybyId) {
-      setStatusMessage("Pick a great comet and flyby window first.");
+    if (!selectedCometId) {
+      setStatusMessage("Select a great comet first.");
+      return;
+    }
+    if (!perihelionDate) {
+      setStatusMessage("This comet does not have perihelion data yet.");
       return;
     }
     setGenerating(true);
@@ -293,9 +239,7 @@ export default function GreatCometsPage() {
     try {
       const payload: Record<string, unknown> = {
         cometId: selectedCometId,
-        flybyId: selectedFlybyId,
       };
-      if (observerName.trim()) payload.observerName = observerName.trim();
       if (focusPrompt.trim()) payload.focus = focusPrompt.trim();
 
       const execution = await functions.createExecution({
@@ -330,7 +274,7 @@ export default function GreatCometsPage() {
     } finally {
       setGenerating(false);
     }
-  }, [selectedCometId, selectedFlybyId, observerName, focusPrompt, functions, functionId, loadSightings]);
+  }, [selectedCometId, perihelionDate, focusPrompt, functions, functionId, loadSightings]);
 
   return (
     <div className="relative min-h-dvh">
@@ -367,7 +311,6 @@ export default function GreatCometsPage() {
                   value={selectedCometId}
                   onChange={(value) => {
                     setSelectedCometId(value);
-                    setSelectedFlybyId("");
                   }}
                   items={cometOptions}
                   className="max-w-md"
@@ -376,41 +319,33 @@ export default function GreatCometsPage() {
               </div>
 
               <div className="space-y-2">
-                <div className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">Flyby year</div>
-                <Dropdown
-                  value={selectedFlybyId}
-                  onChange={setSelectedFlybyId}
-                  items={flybyOptions}
-                  className="max-w-md"
-                />
-                {flybysLoading && <div className="text-xs text-foreground/60">Synchronizing orbital windows…</div>}
-                {flybysError && (
-                  <div className="text-xs text-rose-200/80">{flybysError}</div>
-                )}
+                <div className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">Perihelion anchor</div>
+                <div className="rounded-md border border-white/10 bg-white/5 px-4 py-3 text-sm text-foreground/80">
+                  {perihelionLabel ? (
+                    <>
+                      <span className="font-medium text-white">{perihelionLabel}</span>
+                      <span className="ml-2 text-xs uppercase tracking-[0.3em] text-foreground/60">Derived from last perihelion</span>
+                    </>
+                  ) : (
+                    "No perihelion data available yet — add orbital elements to enable sightings."
+                  )}
+                </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="space-y-1 text-sm">
-                  <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">Observer</span>
-                  <Input
-                    value={observerName}
-                    onChange={(event) => setObserverName(event.target.value)}
-                    placeholder="Observer name"
-                  />
-                </label>
-                <label className="space-y-1 text-sm">
-                  <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">Focus (optional)</span>
-                  <textarea
-                    value={focusPrompt}
-                    onChange={(event) => setFocusPrompt(event.target.value)}
-                    placeholder="e.g. Southern hemisphere aurora, cultural response, instrumentation"
-                    className="h-[3.2rem] w-full rounded-md border border-white/15 bg-transparent px-3 py-2 text-sm text-foreground/90 outline-none transition focus:border-accent/60 focus:ring-1 focus:ring-accent/40"
-                  />
-                </label>
-              </div>
+              <label className="space-y-1 text-sm">
+                <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">Focus (optional)</span>
+                <Textarea
+                  value={focusPrompt}
+                  onChange={(event) => setFocusPrompt(event.target.value)}
+                  placeholder="Add flavour — e.g. southern aurora, indigenous storytelling, spectroscopy notes"
+                  className="leading-relaxed"
+                  rows={3}
+                />
+                <p className="text-[11px] uppercase tracking-[0.2em] text-foreground/50">This guides the tone of the generated log.</p>
+              </label>
 
               <div className="flex items-center gap-3">
-                <Button variant="space" onClick={handleGenerate} disabled={generating || !selectedCometId || !selectedFlybyId}>
+                <Button variant="space" onClick={handleGenerate} disabled={generating || !selectedCometId || !perihelionDate}>
                   {generating ? "Generating…" : "Generate sighting"}
                 </Button>
                 {statusMessage && <div className="text-xs text-foreground/70">{statusMessage}</div>}

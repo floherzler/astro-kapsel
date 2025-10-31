@@ -40,11 +40,18 @@ function coerceNumber(value: unknown): number | null {
   return null;
 }
 
-function jdToYear(value: unknown): number | null {
+function jdToDate(value: unknown): Date | null {
   const numeric = coerceNumber(value);
   if (numeric === null) return null;
-  const year = 2000 + (numeric - 2451545.0) / 365.25;
-  return Number.isFinite(year) ? year : null;
+  const ms = (numeric - 2440587.5) * 86400000;
+  return new Date(ms);
+}
+
+function formatUTCDate(date: Date): string {
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(date.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 function formatCometLabel(row: HomeCometRow): string {
@@ -70,9 +77,9 @@ function formatPeriod(periodYears: unknown): string | null {
 }
 
 function formatLastPerihelion(reading: unknown): string | null {
-  const year = jdToYear(reading);
-  if (year === null) return null;
-  return `Last perihelion ~${Math.round(year)}`;
+  const date = jdToDate(reading);
+  if (!date) return null;
+  return `Perihelion ${formatUTCDate(date)}`;
 }
 
 function buildDetailLine(row: HomeCometRow): string {
@@ -137,9 +144,9 @@ function categoriseComets(rows: HomeCometRow[]): CategorisedComets {
     buckets.other.push(row);
   }
 
-  const byLastYearDesc = (a: HomeCometRow, b: HomeCometRow) => {
-    const ay = jdToYear(a.last_perihelion_year) ?? Number.NEGATIVE_INFINITY;
-    const by = jdToYear(b.last_perihelion_year) ?? Number.NEGATIVE_INFINITY;
+  const byLastPerihelionDesc = (a: HomeCometRow, b: HomeCometRow) => {
+    const ay = jdToDate(a.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    const by = jdToDate(b.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
     return by - ay;
   };
 
@@ -153,10 +160,10 @@ function categoriseComets(rows: HomeCometRow[]): CategorisedComets {
   };
 
   buckets.periodic.sort(byPeriodAsc);
-  buckets.longPeriod.sort(byLastYearDesc);
+  buckets.longPeriod.sort(byLastPerihelionDesc);
   buckets.hyperbolic.sort((a, b) => {
-    const ay = jdToYear(a.last_perihelion_year) ?? Number.NEGATIVE_INFINITY;
-    const by = jdToYear(b.last_perihelion_year) ?? Number.NEGATIVE_INFINITY;
+    const ay = jdToDate(a.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
+    const by = jdToDate(b.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
     if (ay === by) return formatCometLabel(a).localeCompare(formatCometLabel(b));
     return by - ay;
   });

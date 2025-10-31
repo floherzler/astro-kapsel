@@ -40,7 +40,7 @@ type FalResult<TPayload> = {
 
 type SightingRequestBody = {
     cometId: string;
-    flybyId: string;
+    flybyId?: string | null;
     observerName: string | null;
     location: string | null;
     focus: string | null;
@@ -56,6 +56,7 @@ type CometRow = Models.Document & {
     designation?: string | null;
     prefix?: string | null;
     comet_status?: string | null;
+    last_perihelion_year?: number | string | null;
 };
 
 type SightingRow = Models.Document & {
@@ -128,14 +129,14 @@ function normalizeSightingInput(ctx: HandlerContext, raw: unknown): SightingRequ
     const focus =
         typeof body.focus === "string" && body.focus.trim().length > 0 ? body.focus.trim() : null;
 
-    if (!cometId || !flybyId) {
+    if (!cometId) {
         ctx.log("[generateSighting] invalid body payload");
         return null;
     }
 
     return {
         cometId,
-        flybyId,
+        flybyId: flybyId || null,
         observerName,
         location,
         focus,
@@ -196,6 +197,57 @@ async function generateText(prompt: string, model: string = DEFAULT_TEXT_MODEL) 
 
 function castDocument<T>(row: unknown): T {
     return row as unknown as T;
+}
+
+function jdToDate(value: unknown): Date | null {
+    const numeric = coerceNumber(value);
+    if (numeric === null) return null;
+    const year = 2000 + (numeric - 2451545.0) / 365.25;
+    if (!Number.isFinite(year)) return null;
+    const ms = (numeric - 2440587.5) * 86400000;
+    return new Date(ms);
+}
+
+async function findOrCreateFlyby(params: {
+    tables: TablesDB;
+    databaseId: string;
+    tableId: string;
+    cometId: string;
+    targetYear: number;
+}): Promise<FlybyRow> {
+    const { tables, databaseId, tableId, cometId, targetYear } = params;
+    const res = await tables.listRows({
+        databaseId,
+        tableId,
+        queries: [
+            Query.equal("comet.$id", [cometId]),
+            Query.select(["$id", "year", "description", "comet.$id"]),
+            Query.limit(50),
+        ],
+    });
+
+    const rows = Array.isArray(res.rows) ? res.rows : [];
+    const existing = rows
+        .map((row) => castDocument<FlybyRow>(row))
+        .find((row) => {
+            const y = coerceNumber(row.year);
+            return typeof y === "number" && Math.abs(y - targetYear) <= 0.25;
+        });
+
+    if (existing) return existing;
+
+    const created = await tables.createRow({
+        databaseId,
+        tableId,
+        rowId: ID.unique(),
+        data: {
+            comet: cometId,
+            year: targetYear,
+            description: "Perihelion passage",
+        } as Record<string, unknown>,
+    });
+
+    return castDocument<FlybyRow>(created);
 }
 
 async function getComet(ctx: HandlerContext, tables: TablesDB, params: { databaseId: string; tableId: string; cometId: string }) {
@@ -263,7 +315,7 @@ export default async function handler(ctx: HandlerContext) {
         return res.json(
             {
                 ok: false,
-                error: "Invalid payload. Provide cometId and flybyId.",
+                error: "Invalid payload. Provide cometId.",
             },
             400
         );
@@ -310,25 +362,30 @@ export default async function handler(ctx: HandlerContext) {
     const tables = new TablesDB(client);
 
     try {
-        const flyby = await getFlyby(ctx, tables, {
-            databaseId,
-            tableId: tableFlybys,
-            flybyId: normalized.flybyId,
-        });
+        let cometId = normalized.cometId;
+        let flyby: FlybyRow | null = null;
 
-        if (!flyby) {
-            return res.json({ ok: false, error: "Flyby not found." }, 404);
-        }
+        if (normalized.flybyId) {
+            flyby = await getFlyby(ctx, tables, {
+                databaseId,
+                tableId: tableFlybys,
+                flybyId: normalized.flybyId,
+            });
 
-        const cometId = extractRelationId(flyby.comet) ?? normalized.cometId;
-        if (!cometId) {
-            return res.json({ ok: false, error: "Flyby is missing comet relation." }, 400);
-        }
+            if (!flyby) {
+                return res.json({ ok: false, error: "Flyby not found." }, 404);
+            }
 
-        if (cometId !== normalized.cometId) {
-            log(
-                `[generateSighting] provided comet ${normalized.cometId} mismatched flyby relation ${cometId}, using relation`
-            );
+            const relationId = extractRelationId(flyby.comet);
+            if (!relationId) {
+                return res.json({ ok: false, error: "Flyby is missing comet relation." }, 400);
+            }
+            if (relationId !== cometId) {
+                log(
+                    `[generateSighting] provided comet ${cometId} mismatched flyby relation ${relationId}, using relation`
+                );
+                cometId = relationId;
+            }
         }
 
         const comet = await getComet(ctx, tables, {
@@ -352,15 +409,34 @@ export default async function handler(ctx: HandlerContext) {
             );
         }
 
-        const year = coerceNumber(flyby.year);
+        let year: number | null = flyby ? coerceNumber(flyby.year) : null;
+
+        if (!flyby) {
+            const perihelionDate = jdToDate(comet.last_perihelion_year);
+            if (!perihelionDate) {
+                return res.json(
+                    { ok: false, error: "Comet is missing perihelion timing data." },
+                    400
+                );
+            }
+            year = perihelionDate.getUTCFullYear();
+            flyby = await findOrCreateFlyby({
+                tables,
+                databaseId,
+                tableId: tableFlybys,
+                cometId,
+                targetYear: year,
+            });
+        }
+
         if (year === null) {
             return res.json(
-                { ok: false, error: "Flyby is missing a valid year value." },
+                { ok: false, error: "Unable to determine flyby year." },
                 400
             );
         }
 
-        const falApiKey = process.env.FAL_API_KEY;
+        const falApiKey = process.env.FAL_API_KEY as string | undefined;
         ensureFalClientConfigured(falApiKey!);
 
         const prompt = buildPrompt({
@@ -374,7 +450,7 @@ export default async function handler(ctx: HandlerContext) {
 
         const { note, requestId, model } = await generateText(prompt);
 
-        const flybyIdValue = flyby.$id;
+        const flybyIdValue = flyby?.$id;
         if (!flybyIdValue) {
             return res.json({ ok: false, error: "Flyby row missing identifier." }, 500);
         }
@@ -394,7 +470,7 @@ export default async function handler(ctx: HandlerContext) {
             {
                 ok: true,
                 sightingId: sighting.$id,
-                flybyId: flyby.$id,
+                flybyId: flybyIdValue,
                 cometId,
                 year,
                 observer: observerName,
