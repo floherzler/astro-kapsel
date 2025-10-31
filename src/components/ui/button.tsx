@@ -25,10 +25,11 @@ export function Button({
     md: "px-4 py-2.5 rounded-md",
     lg: "px-5 py-3 rounded-lg",
   };
+  const orbitEnabled = variant === "space" || variant === "secondary";
 
   return (
     <button
-      className={`${variants[variant]} ${sizes[size]} font-medium disabled:opacity-60 disabled:cursor-not-allowed ${className}`}
+      className={`relative inline-flex items-center justify-center overflow-hidden transition duration-200 ease-out ${variants[variant]} ${sizes[size]} font-medium disabled:opacity-60 disabled:cursor-not-allowed ${orbitEnabled ? "orbit-hover" : ""} ${className}`}
       {...props}
     />
   );

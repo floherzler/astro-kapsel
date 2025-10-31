@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import client from "@/lib/appwrite";
@@ -111,8 +111,17 @@ function solveKeplerEllipse(M: number, e: number): number {
 }
 
 type OrbitViewVariant = "default" | "compact";
+type OrbitFilterMode = "p-only" | "p-c-inner";
 
-export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?: string[]; variant?: OrbitViewVariant }) {
+export default function OrbitView3D({
+  onlyIds,
+  variant = "default",
+  filterMode = "p-only",
+}: {
+  onlyIds?: string[];
+  variant?: OrbitViewVariant;
+  filterMode?: OrbitFilterMode;
+}) {
   const [rows, setRows] = useState<CometRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -134,6 +143,27 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
   const databaseId = process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID || process.env.APPWRITE_DATABASE_ID || "astroDB";
   const tableId = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || "comets";
   const tables = useMemo(() => new TablesDB(client), []);
+
+  const matchesFilter = useCallback(
+    (row: CometRow) => {
+      const prefix = row.prefix?.toUpperCase() ?? "";
+      if (filterMode === "p-only") {
+        return prefix === "P";
+      }
+      if (filterMode === "p-c-inner") {
+        if (prefix === "P") return true;
+        const qSource = (row as unknown as { perihelion_distance_au?: number | null }).perihelion_distance_au;
+        const qRaw = row.perihelion_distance ?? qSource;
+        const q = typeof qRaw === "number" ? qRaw : Number(qRaw);
+        if (!Number.isFinite(q)) return false;
+        if (prefix === "C") return q <= 3;
+        const status = normalizeStatus(row.comet_status, row.is_viable);
+        return (!prefix && status === "viable") ? q <= 3 : false;
+      }
+      return true;
+    },
+    [filterMode]
+  );
 
   // Data load + realtime
   useEffect(() => {
@@ -313,6 +343,7 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
     const valid = rows
       .filter((r) => (r.semi_major_axis ?? null) && (r.eccentricity ?? null))
       .filter((r) => (idsSet ? idsSet.has(r.$id) : true))
+      .filter((r) => matchesFilter(r))
       .filter((r) => showAsteroids || normalizeStatus(r.comet_status, r.is_viable) !== "asteroid");
     const maxAComets = valid.reduce((m, r) => Math.max(m, r.semi_major_axis || 0), 1);
     const maxAPlanets = showPlanets ? 30.1 : 0; // up to Neptune's ~30 AU
@@ -555,7 +586,7 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
     scene.add(group);
     orbitsGroupRef.current = group;
     interactivesRef.current = interactives;
-  }, [rows, showPlanets, showKuiper, showAsteroids, onlyIds, variant]);
+  }, [rows, showPlanets, showKuiper, showAsteroids, onlyIds, variant, matchesFilter]);
 
   const controls = (
     <div className="flex items-center gap-3 text-xs text-foreground/80">
@@ -592,13 +623,6 @@ export default function OrbitView3D({ onlyIds, variant = "default" }: { onlyIds?
           Highlights a ring of icy bodies at 30–50 AU so you can see which comets likely hail from the Kuiper Belt reservoir.
         </HoverCardContent>
       </HoverCard>
-
-      <Switch
-        label="Show Asteroids & Non-Comet Bodies"
-        checked={showAsteroids}
-        onCheckedChange={setShowAsteroids}
-        className="gap-1 [&>span:last-child]:text-[11px] [&>span:last-child]:uppercase [&>span:last-child]:tracking-[0.35em] [&>span:last-child]:text-slate-200/75"
-      />
     </div>
   );
 

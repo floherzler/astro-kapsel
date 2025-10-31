@@ -2,11 +2,8 @@
 
 import React, { useEffect, useState, useMemo, useCallback, type CSSProperties } from "react";
 import client from "@/lib/appwrite";
-import { TablesDB, Query, Functions } from "appwrite";
-import type { Models } from "appwrite";
+import { TablesDB, Query } from "appwrite";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Dropdown } from "@/components/ui/dropdown";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
@@ -30,11 +27,6 @@ type CometRow = {
 type StatusKey = "viable" | "lost" | "unreliable" | "asteroid" | "hyperbolic" | "interstellar" | "unknown";
 type StatusFilterKey = "all" | "viable" | "lost" | "asteroid" | "hyperbolic" | "interstellar";
 type PrefixKey = "P" | "C" | "D" | "X" | "A" | "I";
-type CometSuggestion = {
-  designation?: string | null;
-  name?: string | null;
-  suggestion_label: string;
-};
 
 type CountdownDisplay = {
   label: string;
@@ -126,70 +118,6 @@ function getPrefixInfo(prefix?: string | null) {
 
 type CometListVariant = "default" | "compact";
 type DurationBucket = { key: string; label: string; min?: number; max?: number };
-type ExecutionWithExtras = Models.Execution & {
-  statusCode?: unknown;
-  response?: unknown;
-  stdout?: unknown;
-  result?: unknown;
-};
-
-function formatCometLabelFromPayload(row: Partial<CometRow> | undefined): string | null {
-  if (!row) return null;
-  const name = row.name?.trim();
-  const designation = row.designation?.trim();
-  if (name && designation && name !== designation) return `${name} · ${designation}`;
-  return name ?? designation ?? null;
-}
-
-async function pollExecutionCompletion(
-  functions: Functions,
-  functionId: string,
-  executionId: string,
-  initial: Models.Execution,
-  logUpdate?: (status: string) => void
-): Promise<ExecutionWithExtras> {
-  let current = initial as ExecutionWithExtras;
-  const terminal = new Set(["completed", "failed", "errored", "cancelled", "aborted"]);
-  const maxAttempts = 12;
-  const delayMs = 1000;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    if (terminal.has((current.status ?? "").toLowerCase())) {
-      return current;
-    }
-    logUpdate?.(current.status ?? "waiting");
-    await new Promise((resolve) => setTimeout(resolve, delayMs));
-    current = (await functions.getExecution(functionId, executionId)) as ExecutionWithExtras;
-  }
-  return current;
-}
-
-function coerceFiniteNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return undefined;
-}
-
-function getExecutionStatusCode(execution: ExecutionWithExtras): number | undefined {
-  return coerceFiniteNumber(execution.responseStatusCode) ?? coerceFiniteNumber(execution.statusCode);
-}
-
-function getExecutionResponseBody(execution: ExecutionWithExtras): string {
-  const candidates = [execution.responseBody, execution.response, execution.stdout, execution.result];
-  for (const candidate of candidates) {
-    if (candidate == null) continue;
-    if (typeof candidate === "string" && candidate.length > 0) return candidate;
-  }
-  for (const candidate of candidates) {
-    if (candidate == null) continue;
-    return String(candidate);
-  }
-  return "";
-}
-
 function jdNow(): number {
   return Date.now() / 86400000 + 2440587.5;
 }
@@ -318,11 +246,6 @@ export default function CometList({
   const [comets, setComets] = useState<CometRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
-  const [submitValue, setSubmitValue] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [submitMsg, setSubmitMsg] = useState<string | null>(null);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [blast, setBlast] = useState(false);
   // trigger periodic re-render to keep countdown fresh
   const [, setNowTick] = useState<number>(Date.now());
   const [statusFilter, setStatusFilter] = useState<StatusFilterKey>("all");
@@ -339,8 +262,6 @@ export default function CometList({
     []
   );
   const [selectedBuckets, setSelectedBuckets] = useState<string[]>([]);
-  const [addNotice, setAddNotice] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<CometSuggestion[]>([]);
   // inline info replaces button
   // filters apply in realtime
   const [sortKey, setSortKey] = useState<"id" | "family" | "period" | "last" | "next" | "countdown">("countdown");
@@ -352,7 +273,6 @@ export default function CometList({
   const tableId = process.env.NEXT_PUBLIC_APPWRITE_TABLE_COMETS || "comets";
 
   const tables = useMemo(() => new TablesDB(client), []);
-  const functions = useMemo(() => new Functions(client), []);
 
   // const ORBIT_INFO: Record<string, { short: string; url?: string }> = {
   //   jfc: {
@@ -525,93 +445,6 @@ export default function CometList({
     }
   }, [activeFilterCount]);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const cometID = submitValue.trim();
-    if (!cometID) return;
-    setSubmitting(true);
-    setSubmitMsg(null);
-    setSubmitError(null);
-    setSuggestions([]);
-    try {
-      const functionId = "addComet";
-      if (!functionId) throw new Error("Missing APPWRITE_ADD_COMET env variable");
-
-      let exec = (await functions.createExecution({ functionId, body: JSON.stringify({ cometID }) })) as ExecutionWithExtras;
-      if (exec.status !== "completed") {
-        setSubmitMsg(`Execution status: ${exec.status}. Processing…`);
-        exec = await pollExecutionCompletion(functions, functionId, exec.$id, exec, (status) => {
-          setSubmitMsg(`Execution status: ${status}. Processing…`);
-        });
-      }
-      if (exec.status !== "completed") {
-        setSubmitMsg(`Execution status: ${exec.status}`);
-        setSuggestions([]);
-        setAddNotice(null);
-        setSubmitValue("");
-        return;
-      }
-
-      // Some SDK versions use different property names on the execution result;
-      // use helper functions to normalize fields across SDK versions.
-      const execution = exec as ExecutionWithExtras;
-      const statusCode = getExecutionStatusCode(execution);
-      const rawResponse = getExecutionResponseBody(execution);
-      let parsed: Record<string, unknown> | undefined;
-      if (rawResponse) {
-        try {
-          const candidate = JSON.parse(rawResponse);
-          if (candidate && typeof candidate === "object") {
-            parsed = candidate as Record<string, unknown>;
-          }
-        } catch {
-          parsed = undefined;
-        }
-      }
-      const parsedError = typeof parsed?.error === "string" ? (parsed.error as string) : undefined;
-      const parsedMessage = typeof parsed?.message === "string" ? (parsed.message as string) : undefined;
-      const responseMessage = parsedError ?? parsedMessage ?? (!parsed && rawResponse ? rawResponse : undefined);
-
-      if (typeof statusCode === "number" && Number.isFinite(statusCode) && statusCode >= 400) {
-        const multiMatch = parsed?.reason === "multiple_matches" && Array.isArray(parsed?.suggestions);
-        setSubmitError(responseMessage ?? `Execution failed with status ${statusCode}`);
-        setSubmitMsg(null);
-        setAddNotice(null);
-        setSuggestions(multiMatch ? (parsed!.suggestions as CometSuggestion[]) : []);
-      } else {
-        const addedComet = parsed?.comet as Partial<CometRow> | undefined;
-        const cometLabel = formatCometLabelFromPayload(addedComet);
-        const successMsg =
-          parsedMessage && parsedMessage.length > 0
-            ? parsedMessage
-            : cometLabel
-              ? `☄️ ${cometLabel} ready for the cockpit`
-              : "☄️ Comet added successfully";
-        setSubmitMsg(successMsg);
-        setBlast(true);
-        setTimeout(() => setBlast(false), 1200);
-        setSuggestions([]);
-        const cometCandidate = parsed?.comet as Partial<CometRow> | undefined;
-        if (cometCandidate) {
-          if (cometCandidate.is_viable === false) {
-            setAddNotice("Note: This object is catalogued, but is not a returning comet. Visualizations and summaries are limited.");
-          } else {
-            setAddNotice(null);
-          }
-        } else {
-          setAddNotice(null);
-        }
-      }
-      setSubmitValue("");
-    } catch (err: unknown) {
-      setSubmitError(String((err as Error)?.message ?? err));
-      setAddNotice(null);
-      setSuggestions([]);
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   // tick every minute to keep countdowns fresh
   useEffect(() => {
     const id = setInterval(() => setNowTick(Date.now()), 60000);
@@ -626,18 +459,6 @@ export default function CometList({
     if (onVisibleChange) onVisibleChange(sorted.map((r) => r.$id));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortKey, sortDir]);
-
-  // Auto-hide transient submit messages
-  useEffect(() => {
-    if (!submitMsg) return;
-    const t = setTimeout(() => setSubmitMsg(null), 4500);
-    return () => clearTimeout(t);
-  }, [submitMsg]);
-  useEffect(() => {
-    if (!submitError) return;
-    const t = setTimeout(() => setSubmitError(null), 6000);
-    return () => clearTimeout(t);
-  }, [submitError]);
 
   const renderedList = (items: CometRow[]) => (
     <Accordion className="space-y-2">
@@ -856,60 +677,6 @@ export default function CometList({
             </div>
           </div>
         </div>
-        <form onSubmit={onSubmit} className="mb-4 flex gap-2">
-          <Input
-            value={submitValue}
-            onChange={(e) => setSubmitValue(e.target.value)}
-            placeholder='Add comet ID, e.g. "1P" or "1P/Halley"'
-            aria-label="Comet ID"
-          />
-          <Button type="submit" disabled={submitting} variant="space" className="relative overflow-hidden">
-            <span aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-r from-accent/15 via-transparent to-transparent" />
-            <span className="mr-1">☄️</span>
-            {submitting ? "Adding…" : "Add"}
-            {blast && <span className="comet-fx" aria-hidden />}
-          </Button>
-        </form>
-        {submitMsg && (
-          <div className="-mt-1 mb-3 rounded-md border border-white/10 bg-white/5 px-3 py-2 text-emerald-200/90 shadow-[0_0_20px_rgba(34,197,94,0.15)]">
-            {submitMsg}
-          </div>
-        )}
-        {addNotice && (
-          <div className="-mt-2 mb-3 rounded-md border border-amber-400/40 bg-amber-500/10 px-3 py-2 text-amber-100 shadow-[0_0_20px_rgba(245,158,11,0.15)]">
-            {addNotice}
-          </div>
-        )}
-        {submitError && (
-          <div className="-mt-1 mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-red-200 shadow-[0_0_20px_rgba(239,68,68,0.15)]">
-            {submitError}
-          </div>
-        )}
-        {suggestions.length > 0 && (
-          <div className="-mt-1 mb-3 rounded-md border border-cyan-400/30 bg-cyan-500/10 px-3 py-3 text-sm text-cyan-50/90 shadow-[0_0_20px_rgba(14,165,233,0.18)]">
-            <p className="mb-2 text-xs uppercase tracking-[0.3em] text-cyan-100/80">Multiple matches found</p>
-            <div className="flex flex-col gap-2">
-              {suggestions.map((s, idx) => (
-                <button
-                  key={`${s.designation ?? s.name ?? idx}`}
-                  type="button"
-                  onClick={() => {
-                    setSubmitValue(s.designation || s.name || "");
-                    setSuggestions([]);
-                  }}
-                  className="flex w-full flex-col items-start rounded-md border border-cyan-400/30 bg-black/20 px-3 py-2 text-left text-sm transition hover:border-cyan-300/60 hover:bg-black/30"
-                >
-                  <span className="font-medium text-cyan-100">{s.suggestion_label}</span>
-                  {(s.designation && s.designation !== s.suggestion_label) || (s.name && s.name !== s.suggestion_label) ? (
-                    <span className="text-xs text-cyan-100/70">
-                      {[s.name, s.designation].filter((val) => val && val !== s.suggestion_label).join(" · ")}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
         {loading && <p className="text-sm text-foreground/70">Loading comets…</p>}
         {listError && <p className="text-sm text-red-400">{listError}</p>}
         {!loading && !listError && comets.length === 0 && (

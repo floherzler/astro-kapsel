@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dropdown } from "@/components/ui/dropdown";
-import { Textarea } from "@/components/ui/textarea";
 
 type CometRow = Models.Document & {
   name?: string | null;
@@ -130,13 +129,13 @@ export default function GreatCometsPage() {
   const [cometsError, setCometsError] = useState<string | null>(null);
   const [selectedCometId, setSelectedCometId] = useState<string>("");
 
-  const [focusPrompt, setFocusPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const [sightings, setSightings] = useState<SightingDisplay[]>([]);
   const [sightingsLoading, setSightingsLoading] = useState(true);
   const [sightingsError, setSightingsError] = useState<string | null>(null);
+  const [expandedEntries, setExpandedEntries] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -150,7 +149,7 @@ export default function GreatCometsPage() {
           queries: [Query.equal("prefix", ["C"]), Query.orderDesc("last_perihelion_year"), Query.limit(200)],
         });
         if (cancelled) return;
-        const rows = Array.isArray(res.rows) ? (res.rows as CometRow[]) : [];
+        const rows = Array.isArray(res.rows) ? (res.rows as unknown as CometRow[]) : [];
         rows.sort((a, b) => {
           const ay = jdToDate(a.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
           const by = jdToDate(b.last_perihelion_year)?.getTime() ?? Number.NEGATIVE_INFINITY;
@@ -201,7 +200,7 @@ export default function GreatCometsPage() {
         ],
       });
 
-      const rows = Array.isArray(res.rows) ? (res.rows as SightingRow[]) : [];
+      const rows = Array.isArray(res.rows) ? (res.rows as unknown as SightingRow[]) : [];
       const mapped = rows
         .map(mapSightingRow)
         .filter((entry): entry is SightingDisplay => entry !== null)
@@ -221,6 +220,10 @@ export default function GreatCometsPage() {
   useEffect(() => {
     loadSightings();
   }, [loadSightings]);
+
+  useEffect(() => {
+    setExpandedEntries({});
+  }, [sightings.length]);
 
   const cometOptions = useMemo(
     () => comets.map((row) => ({ value: row.$id, label: formatCometLabel(row) })),
@@ -244,13 +247,12 @@ export default function GreatCometsPage() {
       return;
     }
     setGenerating(true);
-    setStatusMessage("Generating sighting with Gemini 2.5 Flash Lite…");
-      try {
-        const payload: Record<string, unknown> = {
-          cometId: selectedCometId,
-        };
-        if (focusPrompt.trim()) payload.focus = focusPrompt.trim();
-        if (perihelionJD != null) payload.perihelionJD = perihelionJD;
+    setStatusMessage("Requesting AI-generated sighting via Gemini 2.5 Flash Lite…");
+    try {
+      const payload: Record<string, unknown> = {
+        cometId: selectedCometId,
+      };
+      if (perihelionJD != null) payload.perihelionJD = perihelionJD;
 
       const execution = await functions.createExecution({
         functionId,
@@ -284,7 +286,7 @@ export default function GreatCometsPage() {
     } finally {
       setGenerating(false);
     }
-  }, [selectedCometId, perihelionDate, focusPrompt, functions, functionId, loadSightings]);
+  }, [selectedCometId, perihelionDate, functions, functionId, loadSightings]);
 
   return (
     <div className="relative min-h-dvh">
@@ -293,21 +295,23 @@ export default function GreatCometsPage() {
         <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="text-[11px] uppercase tracking-[0.3em] text-foreground/50">Great Comets Lab</div>
-            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-white">Long-period legends, logged</h1>
+            <h1 className="mt-2 text-4xl font-semibold tracking-tight text-white">Great Comet Sighting Laboratory</h1>
             <p className="mt-3 max-w-2xl text-sm text-foreground/80">
-              Chronicle the brightest apparitions in human memory. Generate fresh observation notes with Gemini 2.5 Flash Lite and keep a historical ledger of type C comet sightings across centuries.
+              Chronicle the brightest apparitions in the historical record. astroKapsel pairs archival telemetry with Gemini 2.5 Flash Lite to draft AI-generated observation notes—review and edit each log before treating it as authoritative.
             </p>
           </div>
           <div className="flex gap-2">
             <Button variant="ghost" size="sm" onClick={() => router.push("/")}>Back to launchpad</Button>
-            <Button variant="space" size="sm" onClick={() => router.push("/cockpit")}>Open cockpit</Button>
           </div>
         </header>
 
-        <section className="mt-10 grid gap-6 lg:grid-cols-[1.05fr_0.95fr]">
+        <section className="mt-10 space-y-6">
           <Card className="shadow-[0_0_30px_rgba(30,64,120,0.35)]">
             <CardHeader>
-              <CardTitle>Generate a new sighting</CardTitle>
+              <CardTitle>Generate an AI sighting summary</CardTitle>
+              <p className="mt-1 text-sm text-foreground/70">
+                Select a great comet and astroKapsel will assemble a Gemini 2.5 Flash Lite narrative anchored to its most recent perihelion.
+              </p>
             </CardHeader>
             <CardContent className="space-y-5">
               {cometsError && (
@@ -341,18 +345,6 @@ export default function GreatCometsPage() {
                   )}
                 </div>
               </div>
-
-              <label className="space-y-1 text-sm">
-                <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">Focus (optional)</span>
-                <Textarea
-                  value={focusPrompt}
-                  onChange={(event) => setFocusPrompt(event.target.value)}
-                  placeholder="Add flavour — e.g. southern aurora, indigenous storytelling, spectroscopy notes"
-                  className="leading-relaxed"
-                  rows={3}
-                />
-                <p className="text-[11px] uppercase tracking-[0.2em] text-foreground/50">This guides the tone of the generated log.</p>
-              </label>
 
               <div className="flex items-center gap-3">
                 <Button variant="space" onClick={handleGenerate} disabled={generating || !selectedCometId || !perihelionDate}>
@@ -393,36 +385,66 @@ export default function GreatCometsPage() {
                 </div>
               ) : (
                 <ScrollArea className="h-[28rem]">
-                  <div className="space-y-4 pr-1">
+                  <div className="space-y-3 pr-1">
                     {sightings.map((entry, idx) => {
-                      const highlight = idx === 0;
+                      const baseExpanded = idx === 0;
+                      const isExpanded = expandedEntries[entry.id] ?? baseExpanded;
+                      const containerClasses = isExpanded
+                        ? "border-accent/60 bg-accent/10 shadow-[0_0_18px_rgba(110,203,255,0.35)]"
+                        : "border-white/10 bg-[#0f1528]/80";
+                      const note = entry.note || "—";
+                      const preview = note.length > 320 ? `${note.slice(0, 320)}…` : note;
                       return (
-                        <div
-                          key={entry.id}
-                          className={`rounded-lg border px-4 py-4 transition ${
-                            highlight
-                              ? "border-accent/60 bg-accent/10 shadow-[0_0_18px_rgba(110,203,255,0.35)]"
-                              : "border-white/10 bg-[#0f1528]/80"
-                          }`}
-                        >
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <Badge variant={highlight ? "default" : "secondary"}>{entry.yearDisplay}</Badge>
-                        <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">
-                          {entry.observer}
-                        </span>
-                      </div>
-                      {(entry.geoLat != null || entry.geoLon != null) && (
-                        <div className="mt-1 text-[11px] uppercase tracking-[0.25em] text-foreground/50">
-                          {entry.geoLat != null ? entry.geoLat.toFixed(2) : "?"}°, {entry.geoLon != null ? entry.geoLon.toFixed(2) : "?"}°
-                        </div>
-                      )}
-                      <div className="mt-2 text-sm font-medium text-white">{entry.cometLabel}</div>
-                          {entry.flybyDescription && (
-                            <div className="text-xs text-foreground/60">{entry.flybyDescription}</div>
+                        <div key={entry.id} className={`rounded-2xl border px-4 py-4 transition ${containerClasses}`}>
+                          <button
+                            type="button"
+                            className="flex w-full items-center justify-between gap-4 text-left"
+                            onClick={() =>
+                              setExpandedEntries((prev) => ({
+                                ...prev,
+                                [entry.id]: !isExpanded,
+                              }))
+                            }
+                          >
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-3">
+                                <Badge variant={isExpanded ? "default" : "secondary"}>{entry.yearDisplay}</Badge>
+                                <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">
+                                  {entry.observer}
+                                </span>
+                              </div>
+                              <div className="text-sm font-medium text-white">{entry.cometLabel}</div>
+                            </div>
+                            <svg
+                              aria-hidden
+                              className={`h-4 w-4 shrink-0 text-foreground/60 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""
+                                }`}
+                              viewBox="0 0 20 20"
+                              fill="none"
+                              xmlns="http://www.w3.org/2000/svg"
+                            >
+                              <path d="M5.5 7.5L10 12l4.5-4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </button>
+                          {!isExpanded && (
+                            <p className="mt-3 text-sm leading-relaxed text-foreground/75">{preview}</p>
                           )}
-                          <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">
-                            {entry.note || "—"}
-                          </p>
+                          <div
+                            className={`overflow-hidden transition-[max-height,opacity] duration-300 ease-out ${isExpanded ? "mt-3 max-h-[30rem] opacity-100" : "max-h-0 opacity-0"
+                              }`}
+                          >
+                            <div className="space-y-3">
+                              {entry.flybyDescription && (
+                                <div className="text-xs uppercase tracking-[0.28em] text-foreground/60">{entry.flybyDescription}</div>
+                              )}
+                              {(entry.geoLat != null || entry.geoLon != null) && (
+                                <div className="text-xs uppercase tracking-[0.28em] text-foreground/50">
+                                  {entry.geoLat != null ? entry.geoLat.toFixed(2) : "?"}°, {entry.geoLon != null ? entry.geoLon.toFixed(2) : "?"}°
+                                </div>
+                              )}
+                              <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground/85">{note}</p>
+                            </div>
+                          </div>
                         </div>
                       );
                     })}

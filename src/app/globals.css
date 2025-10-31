@@ -32,6 +32,7 @@
     radial-gradient(1200px 800px at 80% -10%, color-mix(in oklab, var(--space-nebula) 20%, transparent), transparent 60%),
     radial-gradient(900px 600px at 10% 110%, color-mix(in oklab, var(--space-aurora) 14%, transparent), transparent 60%),
     linear-gradient(180deg, #02040a 0%, #070a14 100%);
+  animation: parallax-pan 90s ease-in-out infinite alternate;
 }
 .starfield::before,
 .starfield::after {
@@ -61,8 +62,14 @@
 }
 
 @keyframes drift {
-  from { transform: translateY(0); }
-  to { transform: translateY(-200px); }
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-60px, -220px, 0); }
+}
+
+@keyframes parallax-pan {
+  0% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(-12px, -8px, 0); }
+  100% { transform: translate3d(10px, 12px, 0); }
 }
 
 /* Orbit ring and glow */
@@ -78,6 +85,17 @@
   border-radius: 9999px;
   background: radial-gradient(circle at 30% 30%, #fff, #bfe6ff 40%, #6ecbff 70%);
   box-shadow: 0 0 8px #89d8ff, 0 0 16px #58c0ff88;
+}
+.orbit-path {
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(102, 214, 255, 0.25));
+}
+.earth-orbit {
+  stroke: rgba(125, 211, 252, 0.6);
+  stroke-width: 1.6px;
+  fill: none;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 4px rgba(125, 211, 252, 0.4));
 }
 
 body {
@@ -117,6 +135,49 @@ body {
 
 .fal-orb-glow {
   animation: fal-orb-glow 6s ease-in-out infinite;
+}
+
+.orbit-hover {
+  position: relative;
+  isolation: isolate;
+}
+.orbit-hover::after {
+  content: "";
+  position: absolute;
+  inset: -140% -45%;
+  background: conic-gradient(from 120deg, transparent 0deg, rgba(102, 214, 255, 0.18) 120deg, rgba(163, 134, 255, 0.28) 210deg, transparent 320deg);
+  opacity: 0;
+  transform: translateX(-30%) rotate(0deg);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  z-index: -1;
+  pointer-events: none;
+}
+.orbit-hover:hover::after,
+.orbit-hover:focus-visible::after {
+  opacity: 0.45;
+  animation: orbit-sweep 1.6s ease-out forwards;
+}
+
+@keyframes orbit-sweep {
+  0% {
+    transform: translateX(-35%) rotate(0deg);
+  }
+  100% {
+    transform: translateX(35%) rotate(420deg);
+  }
+}
+
+.airlock-overlay {
+  background:
+    radial-gradient(40% 40% at 50% 50%, rgba(102, 214, 255, 0.35), transparent 75%),
+    rgba(2, 6, 15, 0.75);
+  animation: airlock-open 0.6s ease-out forwards;
+}
+
+@keyframes airlock-open {
+  0% { opacity: 0; }
+  30% { opacity: 0.8; }
+  100% { opacity: 0; }
 }
 
 .fal-orb-core {
