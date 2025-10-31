@@ -596,7 +596,7 @@ function categoriseComets(rows: HomeCometRow[]): CategorisedComets {
 
 export default function Home() {
   // Share visible IDs between list and 3D orbits
-  const [visibleCometIds, _setVisibleCometIds] = useState<string[] | null>(null);
+  const [visibleCometIds] = useState<string[] | null>(null);
   const router = useRouter();
   const launchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const tables = useMemo(() => new TablesDB(client), []);
@@ -605,7 +605,6 @@ export default function Home() {
   const [catalog, setCatalog] = useState<HomeCometRow[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [_briefingStatus, _setBriefingStatus] = useState<string | null>(null);
   const [classificationOpen, setClassificationOpen] = useState(false);
   const [airlockActive, setAirlockActive] = useState(false);
   const [fleetTab, setFleetTab] = useState<FleetTabKey>("p");

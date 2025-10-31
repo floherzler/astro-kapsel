@@ -287,13 +287,13 @@ export default function GreatCometsPage() {
       }
 
       // Final execution record
-      const finalExec = exec as Record<string, unknown> & { status?: string };
+      const finalExec = exec as Models.Execution;
       if (((finalExec.status ?? "") as string).toLowerCase() !== "completed") {
         setStatusMessage(`Execution finished with status: ${String(finalExec.status ?? "unknown")}`);
         return;
       }
 
-      const output = getExecutionOutput(finalExec as any);
+      const output = getExecutionOutput(finalExec);
       if (output) {
         try {
           const parsed = JSON.parse(output) as { ok?: boolean; message?: string; error?: string } | undefined;
