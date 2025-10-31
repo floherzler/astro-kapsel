@@ -224,6 +224,7 @@ export default function GreatCometsPage() {
   );
   const perihelionDate = useMemo(() => jdToDate(selectedComet?.last_perihelion_year), [selectedComet]);
   const perihelionLabel = perihelionDate ? formatUTCDate(perihelionDate) : null;
+  const perihelionJD = selectedComet?.last_perihelion_year ?? null;
 
   const handleGenerate = useCallback(async () => {
     if (!selectedCometId) {
@@ -236,11 +237,12 @@ export default function GreatCometsPage() {
     }
     setGenerating(true);
     setStatusMessage("Generating sighting with Gemini 2.5 Flash Lite…");
-    try {
-      const payload: Record<string, unknown> = {
-        cometId: selectedCometId,
-      };
-      if (focusPrompt.trim()) payload.focus = focusPrompt.trim();
+      try {
+        const payload: Record<string, unknown> = {
+          cometId: selectedCometId,
+        };
+        if (focusPrompt.trim()) payload.focus = focusPrompt.trim();
+        if (perihelionJD != null) payload.perihelionJD = perihelionJD;
 
       const execution = await functions.createExecution({
         functionId,

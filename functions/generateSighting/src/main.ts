@@ -44,6 +44,7 @@ type SightingRequestBody = {
     observerName: string | null;
     location: string | null;
     focus: string | null;
+    perihelionJD?: number | null;
 };
 
 type FlybyRow = Models.Document & {
@@ -140,6 +141,7 @@ function normalizeSightingInput(ctx: HandlerContext, raw: unknown): SightingRequ
             : null;
     const focus =
         typeof body.focus === "string" && body.focus.trim().length > 0 ? body.focus.trim() : null;
+    const perihelionJD = coerceNumber(body.perihelionJD ?? null);
 
     if (!cometId) {
         ctx.log("[generateSighting] invalid body payload");
@@ -152,6 +154,7 @@ function normalizeSightingInput(ctx: HandlerContext, raw: unknown): SightingRequ
         observerName,
         location,
         focus,
+        perihelionJD,
     };
 }
 
@@ -374,7 +377,12 @@ export default async function handler(ctx: HandlerContext) {
     const tables = new TablesDB(client);
 
     try {
-        logMessage(log, "[generateSighting] payload normalized", normalized);
+        logMessage(log, "[generateSighting] payload normalized", {
+            cometId: normalized.cometId,
+            flybyId: normalized.flybyId ?? null,
+            focus: normalized.focus ?? null,
+            perihelionJD: normalized.perihelionJD ?? null,
+        });
 
         let cometId = normalized.cometId;
         let flyby: FlybyRow | null = null;
@@ -430,7 +438,8 @@ export default async function handler(ctx: HandlerContext) {
         let year: number | null = flyby ? coerceNumber(flyby.year) : null;
 
         if (!flyby) {
-            const perihelionDate = jdToDate(comet.last_perihelion_year);
+            const perihelionSource = normalized.perihelionJD ?? comet.last_perihelion_year;
+            const perihelionDate = jdToDate(perihelionSource);
             if (!perihelionDate) {
                 logMessage(log, "[generateSighting] missing perihelion data");
                 return res.json(
