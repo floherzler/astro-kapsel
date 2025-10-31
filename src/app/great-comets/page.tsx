@@ -35,6 +35,8 @@ type SightingRow = Models.Document & {
   observer_name?: string | null;
   note?: string | null;
   flyby?: FlybyRelation | string | null;
+  geo_lat?: number | null;
+  geo_lon?: number | null;
 };
 
 type SightingDisplay = {
@@ -46,6 +48,8 @@ type SightingDisplay = {
   yearNumeric: number | null;
   flybyDescription: string | null;
   createdAt: string;
+  geoLat?: number | null;
+  geoLon?: number | null;
 };
 
 function coerceNumber(value: unknown): number | null {
@@ -99,6 +103,8 @@ function mapSightingRow(row: SightingRow): SightingDisplay | null {
     yearDisplay: yearNumeric != null ? Math.round(yearNumeric).toString() : "Unknown year",
     yearNumeric: yearNumeric ?? null,
     createdAt: row.$createdAt ?? "",
+    geoLat: typeof row.geo_lat === "number" ? row.geo_lat : null,
+    geoLon: typeof row.geo_lon === "number" ? row.geo_lon : null,
   };
 }
 
@@ -182,6 +188,8 @@ export default function GreatCometsPage() {
             "observer_name",
             "note",
             "$createdAt",
+            "geo_lat",
+            "geo_lon",
             "flyby.$id",
             "flyby.year",
             "flyby.description",
@@ -397,13 +405,18 @@ export default function GreatCometsPage() {
                               : "border-white/10 bg-[#0f1528]/80"
                           }`}
                         >
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <Badge variant={highlight ? "default" : "secondary"}>{entry.yearDisplay}</Badge>
-                            <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">
-                              {entry.observer}
-                            </span>
-                          </div>
-                          <div className="mt-2 text-sm font-medium text-white">{entry.cometLabel}</div>
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <Badge variant={highlight ? "default" : "secondary"}>{entry.yearDisplay}</Badge>
+                        <span className="text-[11px] uppercase tracking-[0.3em] text-foreground/60">
+                          {entry.observer}
+                        </span>
+                      </div>
+                      {(entry.geoLat != null || entry.geoLon != null) && (
+                        <div className="mt-1 text-[11px] uppercase tracking-[0.25em] text-foreground/50">
+                          {entry.geoLat != null ? entry.geoLat.toFixed(2) : "?"}°, {entry.geoLon != null ? entry.geoLon.toFixed(2) : "?"}°
+                        </div>
+                      )}
+                      <div className="mt-2 text-sm font-medium text-white">{entry.cometLabel}</div>
                           {entry.flybyDescription && (
                             <div className="text-xs text-foreground/60">{entry.flybyDescription}</div>
                           )}

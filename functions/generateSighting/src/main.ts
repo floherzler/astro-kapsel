@@ -65,6 +65,8 @@ type SightingRow = Models.Document & {
     observer_name?: string;
     note?: string | null;
     flyby?: string | { $id?: string } | null;
+    geo_lat?: number | null;
+    geo_lon?: number | null;
 };
 
 const DEFAULT_TEXT_MODEL = "google/gemini-2.5-flash-lite";
@@ -163,39 +165,29 @@ function buildPrompt(params: {
     cometName: string;
     cometDesignation?: string | null;
     year: number;
-    observer: string;
     location?: string | null;
     focus?: string | null;
+    observerHint?: string | null;
 }) {
-    const { cometName, cometDesignation, year, observer, location, focus } = params;
-    const header = [`Compose an evocative observational log for a great comet sighting.`];
-    const bullets = [
-        `Comet: ${cometName}${cometDesignation ? ` (${cometDesignation})` : ""}`,
-        `Year of perihelion passage: ${Math.round(year)}`,
-        `Observer on duty: ${observer}`,
-    ];
-    if (location) {
-        bullets.push(`Observation site: ${location}`);
-    }
-    bullets.push(
-        `The sighting should convey atmosphere, sky conditions, and what made this apparition memorable to human history.`
-    );
-    bullets.push(
-        `Write in the style of a field report blended with poetic awe, 130-180 words, no bullet points.`
-    );
-    bullets.push(
-        `Highlight the comet's brightness, tail structure, motion, and a notable cultural or scientific response.`
-    );
-    if (focus) {
-        bullets.push(`Additional context to weave in: ${focus}`);
-    }
+    const { cometName, cometDesignation, year, location, focus, observerHint } = params;
 
-    header.push(...bullets.map((line) => `- ${line}`));
-    header.push(`Return plain text only.`);
-    return header.join("\n");
+    const instructions = [
+        `You are chronicling how people on Earth witnessed a great comet.`,
+        `Comet designation: ${cometName}${cometDesignation ? ` (${cometDesignation})` : ""}.`,
+        `The perihelion year is ${Math.round(year)} — embed references to the era's culture, art, and public mood.`,
+        `Describe atmosphere, sky conditions, tail structure, and how communities reacted (festivals, art, fears, scholarship, media).`,
+        `Write in vivid but factual prose as if an archivist recorded a citizen's field report. Target length: 160-220 words.`,
+        `Return STRICT JSON with keys: observer_name (string), note (string), geo_lat (number or null), geo_lon (number or null), location_hint (string).`,
+        `If coordinates are unknown, set geo_lat and geo_lon to null. Use decimal degrees if you provide them.`,
+    ];
+    if (location) instructions.push(`Suggested location context: ${location}.`);
+    if (focus) instructions.push(`Additional thematic focus: ${focus}.`);
+    if (observerHint) instructions.push(`If it helps, you may base the observer on: ${observerHint}.`);
+    instructions.push(`Ensure note centres on Earth-bound cultural experience.`);
+    return instructions.join("\n");
 }
 
-async function generateText(prompt: string, model: string = DEFAULT_TEXT_MODEL) {
+async function generateText(prompt: string, model: string = DEFAULT_TEXT_MODEL): Promise<{ raw: string; requestId: string; model: string }> {
     const job = (await fal.subscribe(TEXT_ORCHESTRATOR_ID, {
         input: {
             model: model as any,
@@ -208,11 +200,50 @@ async function generateText(prompt: string, model: string = DEFAULT_TEXT_MODEL) 
     if (!text) {
         throw new Error("Fal generation returned no text output");
     }
-    return { note: text, requestId: job.requestId, model };
+    return { raw: text, requestId: job.requestId, model };
 }
 
 function castDocument<T>(row: unknown): T {
     return row as unknown as T;
+}
+
+function parseSightingOutput(raw: string): {
+    observerName?: string;
+    note?: string;
+    geoLat?: number | null;
+    geoLon?: number | null;
+    locationHint?: string;
+} {
+    if (!raw) return {};
+    let content = raw.trim();
+    if (content.startsWith("```")) {
+        const fenced = content.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/i);
+        if (fenced && fenced[1]) content = fenced[1].trim();
+        else content = content.replace(/^```(?:json)?/, "").replace(/```$/, "").trim();
+    }
+    try {
+        const parsed = JSON.parse(content);
+        const observerName = typeof parsed?.observer_name === "string" && parsed.observer_name.trim().length > 0
+            ? parsed.observer_name.trim()
+            : undefined;
+        const note = typeof parsed?.note === "string" && parsed.note.trim().length > 0
+            ? parsed.note.trim()
+            : undefined;
+        const geoLat = coerceNumber(parsed?.geo_lat);
+        const geoLon = coerceNumber(parsed?.geo_lon);
+        const locationHint = typeof parsed?.location_hint === "string" && parsed.location_hint.trim().length > 0
+            ? parsed.location_hint.trim()
+            : undefined;
+        return {
+            observerName,
+            note,
+            geoLat: typeof geoLat === "number" ? geoLat : null,
+            geoLon: typeof geoLon === "number" ? geoLon : null,
+            locationHint,
+        };
+    } catch {
+        return {};
+    }
 }
 
 function jdToDate(value: unknown): Date | null {
@@ -337,7 +368,7 @@ export default async function handler(ctx: HandlerContext) {
         );
     }
 
-    const observerName = normalized.observerName ?? "Gemini Observation Corps";
+    const observerNameHint = normalized.observerName ?? "Earth Observation Corps";
     const databaseId =
         process.env.APPWRITE_DATABASE_ID ||
         process.env.NEXT_PUBLIC_APPWRITE_DATABASE_ID ||
@@ -479,14 +510,28 @@ export default async function handler(ctx: HandlerContext) {
             cometName: comet.name ?? comet.$id ?? "Great Comet",
             cometDesignation: comet.designation,
             year,
-            observer: observerName,
             location: normalized.location,
             focus: normalized.focus,
+            observerHint: observerNameHint,
         });
 
         logMessage(log, "[generateSighting] requesting text generation");
-        const { note, requestId, model } = await generateText(prompt);
-        logMessage(log, "[generateSighting] generation complete", { requestId, model, noteLength: note.length });
+        const generation = await generateText(prompt);
+        const parsed = parseSightingOutput(generation.raw);
+        const note = parsed.note ?? generation.raw;
+        const observerName = parsed.observerName ?? observerNameHint;
+        const geoLat = parsed.geoLat ?? null;
+        const geoLon = parsed.geoLon ?? null;
+        const locationHint = parsed.locationHint ?? normalized.location ?? null;
+        logMessage(log, "[generateSighting] generation complete", {
+            requestId: generation.requestId,
+            model: generation.model,
+            noteLength: note.length,
+            observerName,
+            geoLat,
+            geoLon,
+            locationHint,
+        });
 
         const flybyIdValue = flyby?.$id;
         if (!flybyIdValue) {
@@ -503,6 +548,8 @@ export default async function handler(ctx: HandlerContext) {
                 flyby: flybyIdValue,
                 observer_name: observerName,
                 note,
+                geo_lat: geoLat,
+                geo_lon: geoLon,
             } as Record<string, unknown>,
         }));
 
@@ -515,8 +562,11 @@ export default async function handler(ctx: HandlerContext) {
                 year,
                 observer: observerName,
                 note,
-                requestId,
-                model,
+                geoLat,
+                geoLon,
+                locationHint,
+                requestId: generation.requestId,
+                model: generation.model,
             },
             201
         );
