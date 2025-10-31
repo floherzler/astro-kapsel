@@ -174,9 +174,10 @@ function buildPrompt(params: {
     const instructions = [
         `You are chronicling how people on Earth witnessed a great comet.`,
         `Comet designation: ${cometName}${cometDesignation ? ` (${cometDesignation})` : ""}.`,
-        `The perihelion year is ${Math.round(year)} — embed references to the era's culture, art, and public mood.`,
-        `Describe atmosphere, sky conditions, tail structure, and how communities reacted (festivals, art, fears, scholarship, media).`,
-        `Write in vivid but factual prose as if an archivist recorded a citizen's field report. Target length: 160-220 words.`,
+        `Perihelion year: ${Math.round(year)}. Anchor the account in documented or historically plausible observations only.`,
+        `Describe naked-eye appearance using measurable details (brightness in approximate magnitude, tail length, direction, colour, time of day).`,
+        `Summarise how specific communities responded (scientists, newspapers, artists, religious leaders) using verifiable language. If records are sparse, state the uncertainty—do not invent dramatic events.`,
+        `Tone: accessible to non-specialists, precise, and neutral. 160–220 words, plain sentences.`,
         `Return STRICT JSON with keys: observer_name (string), note (string), geo_lat (number or null), geo_lon (number or null), location_hint (string).`,
         `If coordinates are unknown, set geo_lat and geo_lon to null. Use decimal degrees if you provide them.`,
     ];
